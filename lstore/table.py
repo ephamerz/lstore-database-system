@@ -354,7 +354,7 @@ class Table:
     # @param int version_num: version number to match, where 0 is latest
 
     # @return col_contents: int value at column that matches primary key
-    def rabbit_hunt(self, col_idx, primary_key, version_num):
+    def rabbit_hunt(self, col_idx, primary_key, version_num, base_rid = None):
         version_num *= 1
         physical_col_idx = col_idx + METADATA_COLUMNS
 
@@ -433,5 +433,5 @@ class Table:
         else:
             # using rabbit_hunt with the base_rid
             for col_idx in col_indices:
-                result.append(self.rabbit_hunt(col_idx, None, relative_version, base_rid = rid))
+                result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid))
         return result

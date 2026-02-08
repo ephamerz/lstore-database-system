@@ -242,7 +242,8 @@ class Query:
             
             total = 0
             for rid in rids:
-                value = self.table.rabbit_hunt(aggregate_column_index, None, relative_version, base_rid = rid)
+                primary_key = self.table.read(self.table.key + 4, rid)  # +4 for metadata
+                value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
                 if value is not None:
                     total += value
 
