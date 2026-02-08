@@ -355,16 +355,24 @@ class Table:
 
     # @return col_contents: int value at column that matches primary key
     def rabbit_hunt(self, col_idx, primary_key, version_num):
-        version_num *= -1
-
+        version_num *= 1
         physical_col_idx = col_idx + METADATA_COLUMNS
 
-        # trying to locate by key column instead!!!!!!!!!
-        RIDs = self.index.locate(self.key, primary_key)
-        if len(RIDs) == 0: # record does not exist
-            return None 
-        baseRID = RIDs[0] # if the record exists there should only be one item in the list because primary keys are unique
+        # skip the index lookup if base_rid is provided
+        if base_rid is None:
+            RIDs = self.index.locate(self.key, primary_key)
+            if len(RIDs) == 0:
+                return None
+            baseRID = RIDs[0]
+        else:
+            baseRID = base_rid
 
+        # check if column was ever updated
+        base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
+        if base_schema[col_idx] == '0':
+            # column never updated, so return base value
+            return self.read(physical_col_idx, baseRID)
+        
         indirection_RID = self.read(INDIRECTION_COLUMN, baseRID)
         # check for both 0 and None since we write 0 for "no indirection"
         if indirection_RID == None or indirection_RID == 0: # base rid becomes tail's indirection value if None or 0
@@ -390,4 +398,40 @@ class Table:
         # catch all, return base record
         col_contents = self.read(physical_col_idx, baseRID)
         return col_contents
- 
+    
+    def get_values_by_rid(self, rid, col_indices, relative_version):
+        """
+        Efficiently retrieves multiple column values for any RID.
+
+        :param rid: the base RID of the record
+        :param col_indices: list of user column indicies
+        :param relative_version: 0 for latest, (-) for previous versions
+        """
+        result =[]
+
+        if relative_version == 0:
+            # latest version, check schema first
+            base_schema = self.read(SCHEMA_ENCODING_COLUMN, rid)
+            indirection_rid = self.read(INDIRECTION_COLUMN, rid)
+
+            for col_idx in col_indices:
+                physical_col_idx = col_idx + METADATA_COLUMNS
+                # check if the column was ever updated
+                if base_schema[col_idx] == '0':
+                    # never updated, so read from the base
+                    result.append(self.read(physical_col_idx, rid))
+                elif indirection_rid is None or indirection_rid == 0:
+                    # schema is updated but no tail exists, so read from base
+                    result.append(self.read(physical_col_idx, rid))
+                else:
+                    # check if the latest tail has the column
+                    tail_schema = self.read(SCHEMA_ENCODING_COLUMN, indirection_rid)
+                    if tail_schema[col_idx] == '1':
+                        result.append(self.read(physical_col_idx, indirection_rid))
+                    else:
+                        result.append(self.read(physical_col_idx, rid))
+        else:
+            # using rabbit_hunt with the base_rid
+            for col_idx in col_indices:
+                result.append(self.rabbit_hunt(col_idx, None, relative_version, base_rid = rid))
+        return result

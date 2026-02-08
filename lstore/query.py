@@ -41,7 +41,7 @@ class Query:
         # #if locked
         # except: 
         #     return False
-        self.table.delete_record(primary_key)
+        return self.table.delete_record(primary_key)
     
     
     """
@@ -95,17 +95,11 @@ class Query:
         #    return False
         
         rid = rids[0]
-        return_columns = []
-        
-        for i in range(len(projected_columns_index)):
-            if projected_columns_index[i] == 1:
-                return_columns.append(self.table.rabbit_hunt(i, search_key, LATEST_VERSION))
-            #dont need
-            #else:
-                #return_columns.append(0)
-        #return a list!! of Record ojs
-        return [Record(rid, search_key, return_columns)]
-    
+
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        vals = self.table.get_values_by_rid(rid, cols, 0)   # 0 = latest
+
+        return [Record(rid, search_key, vals)]
 
 
     """
@@ -132,16 +126,11 @@ class Query:
         #    return False
         
         rid = rids[0]
-        return_columns = []
-        
-        for i in range(len(projected_columns_index)):
-            if projected_columns_index[i] == 1:
-                return_columns.append(self.table.rabbit_hunt(i, search_key, relative_version))
-            #can leave out to not add zeros to output
-            #else:
-                #return_columns.append(0)
-        #return a list of Record ojs
-        return [Record(rid, search_key, return_columns)]
+
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        vals = self.table.get_values_by_rid(rid, cols, relative_version)  
+
+        return [Record(rid, search_key, vals)]
 
 #############
 
@@ -195,25 +184,44 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        total = 0   # starting at 0 count
-        found = False   # making sure there is at least 1 valid record found
-
         try:
-            # going through all of the keys in range
-            for key in range(start_range, end_range + 1):
+            rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+            if len(rids) == 0:
+                return False
+            
+            total = 0
+            physical_col_idx = aggregate_column_index + 4 # for metadata columns
 
-                # adding values from the most recent versions
-                to_add = self.table.rabbit_hunt(aggregate_column_index, key, LATEST_VERSION)
-                if to_add is not None:
-                    total += to_add
-                found = True
+            # processing each RID directly
+            for rid in rids:
+                # reading base schema to check if the column was ever updated
+                base_schema = self.table.read(3, rid) # for SCHEMA_ENCODING_COLUMN
+                # if column never updated, read from base directly
+                if base_schema[aggregate_column_index] == '0':
+                    value = self.table.read(physical_col_idx, rid)
+                    if value is not None:
+                        total += value
+                else:
+                    # column has updates, check tail
+                    indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
+                    if indirection_rid is None or indirection_rid == 0:
+                        value = self.table.read(physical_col_idx, rid)
+                    else:
+                        # check if the latest tail has the column
+                        tail_schema = self.table.read(3, indirection_rid)
+                        if tail_schema[aggregate_column_index] == '1':
+                            value = self.table.read(physical_col_idx, indirection_rid)
+                        else:
+                            value = self.table.read(physical_col_idx, rid)
 
-            # return false if no records are found
-            return total if found else False
+                if value is not None:
+                    total += value
+
+            return total
         except:
             return False
+       
 
-        pass
 
     
     """
@@ -226,23 +234,19 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-        # no versions will exist if page_directory stores only 1 tuple per RID
-
-        total = 0   # starting at 0 count
-        found = False   # making sure there is at least 1 valid record found
-
         try:
-            # going through all of the keys in range
-            for key in range(start_range, end_range + 1):
+            rids = self.table.index.locate_range(start_range, end_range, self.table.key)
 
-                # adding values from the most recent versions
+            if len(rids) == 0:
+                return False
+            
+            total = 0
+            for rid in rids:
+                value = self.table.rabbit_hunt(aggregate_column_index, None, relative_version, base_rid = rid)
+                if value is not None:
+                    total += value
 
-                to_add = self.table.rabbit_hunt(aggregate_column_index, key, relative_version)
-                if to_add is not None:
-                    total += to_add
-                found = True
-            # return false if no records are found
-            return total if found else False
+            return total
         except:
             return False
 
@@ -257,7 +261,10 @@ class Query:
     # Returns False if no record matches key or if target record is locked by 2PL.
     """
     def increment(self, key, column):
-        r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
+        result = self.select(key, self.table.key, [1] * self.table.num_columns)
+        if result is False or len(result) == 0:
+            return False
+        r = result[0]
         if r is not False:
             # creating an update list
             updated_columns = [None] * self.table.num_columns
