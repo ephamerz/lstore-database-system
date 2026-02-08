@@ -196,11 +196,10 @@ class Query:
             for rid in rids:
                 # reading base schema to check if the column was ever updated
                 base_schema = self.table.read(3, rid) # for SCHEMA_ENCODING_COLUMN
+                value = None
                 # if column never updated, read from base directly
                 if base_schema[aggregate_column_index] == '0':
                     value = self.table.read(physical_col_idx, rid)
-                    if value is not None:
-                        total += value
                 else:
                     # column has updates, check tail
                     indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
