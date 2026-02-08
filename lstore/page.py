@@ -33,7 +33,7 @@ class Page:
                 self.data[self.page_size:self.page_size + ENTRY_SIZE] = value_bytes
                 self.page_size += ENTRY_SIZE
             else:
-                self.data[self.page_size:self.page_size + ENTRY_SIZE] = value.to_bytes(ENTRY_SIZE, byteorder="little")
+                self.data[self.page_size:self.page_size + ENTRY_SIZE] = value.to_bytes(ENTRY_SIZE, byteorder="little", signed=True)
                 self.page_size += ENTRY_SIZE
             return True
         return False
@@ -54,7 +54,7 @@ class Page:
     def replace(self, value, index):
 
         if isinstance(value, int):
-            value_bytes = value.to_bytes(ENTRY_SIZE, byteorder="little")
+            value_bytes = value.to_bytes(ENTRY_SIZE, byteorder="little", signed=True)
         elif isinstance(value, str):
             value_bytes = value.encode()
             value_bytes = value_bytes[:ENTRY_SIZE].ljust(ENTRY_SIZE, b'0')
