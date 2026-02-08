@@ -185,34 +185,40 @@ class Query:
     """
     def sum(self, start_range, end_range, aggregate_column_index):
         try:
+            # use the table's index to find all base RIDs with primary key in the range
             rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+            # if no records, fails
             if len(rids) == 0:
                 return False
-            
+            # initializing running total count for aggregation
             total = 0
-            physical_col_idx = aggregate_column_index + 4 # for metadata columns
+            physical_col_idx = aggregate_column_index + 4 # skipping first 4 metadata columns for column index
 
             # processing each RID directly
             for rid in rids:
                 # reading base schema to check if the column was ever updated
-                base_schema = self.table.read(3, rid) # for SCHEMA_ENCODING_COLUMN
-                value = None
-                # if column never updated, read from base directly
+                base_schema = self.table.read(3, rid) # 3 for SCHEMA_ENCODING_COLUMN
+                value = None    # placeholder value that is added by sum
+                # if column was never updated, read from base directly
                 if base_schema[aggregate_column_index] == '0':
                     value = self.table.read(physical_col_idx, rid)
                 else:
-                    # column has updates, check tail
+                    # column has updates, so check the tail
                     indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
+                    # if there is no indirection pointer (0/none), no tail record exists --> go to base record
                     if indirection_rid is None or indirection_rid == 0:
                         value = self.table.read(physical_col_idx, rid)
                     else:
-                        # check if the latest tail has the column
+                        # tail record exists, check whether latest tail actually contains updated value for the column
                         tail_schema = self.table.read(3, indirection_rid)
+                        # if tail schema bit is '1', tail holds latest value
                         if tail_schema[aggregate_column_index] == '1':
                             value = self.table.read(physical_col_idx, indirection_rid)
                         else:
+                            # base should be the correct record then
                             value = self.table.read(physical_col_idx, rid)
-
+                
+                # only add the value to the total if we successfully retrieve a value
                 if value is not None:
                     total += value
 
@@ -234,15 +240,21 @@ class Query:
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
         try:
+            # use the table's index to find all base RIDs with primary key in the range
             rids = self.table.index.locate_range(start_range, end_range, self.table.key)
-
+            # if no records fall in range
             if len(rids) == 0:
                 return False
             
-            total = 0
+            total = 0   # initializing running total count for aggregation result
+
+            # for each base RID returned in the range
             for rid in rids:
+                # read primary key value directly from base
                 primary_key = self.table.read(self.table.key + 4, rid)  # +4 for metadata
+                # retrieve the value of aggregate column at requested relative version through rabbit hunt
                 value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
+                # add to total if valud value was returned
                 if value is not None:
                     total += value
 

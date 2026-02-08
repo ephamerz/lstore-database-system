@@ -358,19 +358,19 @@ class Table:
         version_num *= 1
         physical_col_idx = col_idx + METADATA_COLUMNS
 
-        # skip the index lookup if base_rid is provided
+        # if not given base RID, find base record using primary_key index
         if base_rid is None:
-            RIDs = self.index.locate(self.key, primary_key)
-            if len(RIDs) == 0:
+            RIDs = self.index.locate(self.key, primary_key) # locate all RIDs that match primary key in index
+            if len(RIDs) == 0:  # if index returns nothing, record doesn't exist
                 return None
-            baseRID = RIDs[0]
-        else:
+            baseRID = RIDs[0]   # so then first RID treated as base RID for this record's version
+        else:   # if know base RID, skip index lookup
             baseRID = base_rid
 
-        # check if column was ever updated
+        # check base record's schema encoding to see if columns were ever updated
         base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
         if base_schema[col_idx] == '0':
-            # column never updated, so return base value
+            # column never updated, so return base value b/c we know it is correct
             return self.read(physical_col_idx, baseRID)
         
         indirection_RID = self.read(INDIRECTION_COLUMN, baseRID)
@@ -407,31 +407,35 @@ class Table:
         :param col_indices: list of user column indicies
         :param relative_version: 0 for latest, (-) for previous versions
         """
-        result =[]
+        result =[]  # list of values in same order as col_indices
 
         if relative_version == 0:
-            # latest version, check schema first
+            # latest version, read base schema
             base_schema = self.read(SCHEMA_ENCODING_COLUMN, rid)
-            indirection_rid = self.read(INDIRECTION_COLUMN, rid)
+            indirection_rid = self.read(INDIRECTION_COLUMN, rid)    # read base indirection once to get latest values from newest tail record
 
+            # for each requested column, decide whether we should read from base, or from latest tail record
             for col_idx in col_indices:
                 physical_col_idx = col_idx + METADATA_COLUMNS
                 # check if the column was ever updated
                 if base_schema[col_idx] == '0':
                     # never updated, so read from the base
                     result.append(self.read(physical_col_idx, rid))
+                # if the schema says it was updated, but no tail chain, continue to read from base
                 elif indirection_rid is None or indirection_rid == 0:
                     # schema is updated but no tail exists, so read from base
                     result.append(self.read(physical_col_idx, rid))
                 else:
                     # check if the latest tail has the column
                     tail_schema = self.read(SCHEMA_ENCODING_COLUMN, indirection_rid)
+                    # if newest tail has the column, it becomes the latest value
                     if tail_schema[col_idx] == '1':
                         result.append(self.read(physical_col_idx, indirection_rid))
                     else:
+                        # case where newest tail doesn't have the column, latest value stays from base record
                         result.append(self.read(physical_col_idx, rid))
         else:
             # using rabbit_hunt with the base_rid
             for col_idx in col_indices:
-                result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid))
+                result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid))   # primary_key is unused when base_rid is given, 0 is placeholder
         return result
