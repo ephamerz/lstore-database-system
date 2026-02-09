@@ -66,28 +66,38 @@ class Table:
         values[SCHEMA_ENCODING_COLUMN] = '0' * self.num_columns
         values += columns
 
-        for i in range(self.total_columns):
+        #EDIT ->
+        #for i in range(self.total_columns):
             # check if the base page fully has room for each column. if any of them don't, we need to move on to the next base page
-            if not page_range.base_pages[page_range.basePageToWrite][i].has_capacity(8): # len(values[i]) is future proofing lol -DH
-                page_range.basePageToWrite += 1 
-                break
+        
+        # -> for loop takes more time so redo it//redundant
+        #    only nned to check once rather than looping; change .has_capacity(i) to Entry Size = 8 since constant
+        if not page_range.base_pages[page_range.basePageToWrite][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
+            page_range.basePageToWrite += 1 
+       
         # if the page range is full, then allocate a new page range
-        if page_range.basePageToWrite >= MAX_BASE_PAGES:
-            self.page_ranges.append(PageRange(self.total_columns))
-            page_range = self.page_ranges[len(self.page_ranges)-1]
+            if page_range.basePageToWrite >= MAX_BASE_PAGES:
+                self.page_ranges.append(PageRange(self.total_columns))
+                page_range = self.page_ranges[len(self.page_ranges)-1]
 
         # ---- THIS NEEDS TO BE REVISITED as all milestones have all columns as 64 bit integers, no strings or anything
         # can safely write the entire base record into the base page of the selected page range
+        
         page_offsets = [None] * self.total_columns # save the page offsets for each column for later
+        
         for i in range(self.total_columns):
             page_offsets[i] = page_range.base_pages[page_range.basePageToWrite][i].page_size
             page_range.base_pages[page_range.basePageToWrite][i].write(values[i])
         # ----------------------------------------------------------------------
 
-
+        #EDIT ->
         # add the values to the index. for now just index the primary key
-        for i in range(self.num_columns):
-            self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
+        #for i in range(self.num_columns):
+        #    self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
+        
+        # -> for loop will take  O(n) time so longer needed, 
+        #    since we just want to index primary key dont need the whole for loop so O(1) time
+        self.index.insert_record(values[RID_COLUMN], values[self.key + METADATA_COLUMNS], self.key)
 
         # add the mapping to the page directory
         page_range_index = len(self.page_ranges)-1
