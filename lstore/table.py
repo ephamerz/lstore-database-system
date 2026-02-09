@@ -131,7 +131,12 @@ class Table:
         #calls the same str multiple times each add on:
         #schema_encoding = ""
         #for i in range(self.num_columns):
-
+            # if the caller provided a value for this column and it's not None, mark as updated
+        #    if i < len(columns) and (columns[i] is not None):
+        #        schema_encoding += '1'
+            # column not being updated
+        #    else:
+        #        schema_encoding += '0'
         #values[SCHEMA_ENCODING_COLUMN] = schema_encoding
         #-> will just need to add to list rather than reproduce and add
         schema_encoding = []
@@ -156,9 +161,6 @@ class Table:
         page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
         page_range = self.page_ranges[page_range_index]
         
-        #whether it has been updated or not
-        first_update_RID = None
-
         for i in range(len(columns)):
             if base_schema[i] == '0' and columns[i] != None: # check if this column has ever been updated before, and that we are trying to update it
                 first_update = [None] * (METADATA_COLUMNS + len(columns))
@@ -169,14 +171,8 @@ class Table:
                     first_update[INDIRECTION_COLUMN] = baseRID # (1) base rid becomes tail's indirection value
                 else: # base already had an update
                     first_update[INDIRECTION_COLUMN] = new_indirection  # (1) whatever was in the indirection column of base goes into first_updates indirection
+                self.replace(baseRID, INDIRECTION_COLUMN, first_update[RID_COLUMN]) # (2) update base to newest tail
                 
-                #self.replace(baseRID, INDIRECTION_COLUMN, first_update[RID_COLUMN]) # (2) update base to newest tail
-                #only update indirection once per update
-                if first_update_RID == None:
-                    self.replace(baseRID, INDIRECTION_COLUMN,first_update[RID_COLUMN])
-                    first_update_RID = first_update[RID_COLUMN] 
-
-
                 # first_update_schema must reflect all columns (length = num_columns)
                 #first_update_schema = ""
                 #for j in range(self.num_columns):
