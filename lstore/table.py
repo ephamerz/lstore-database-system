@@ -66,10 +66,8 @@ class Table:
         values[SCHEMA_ENCODING_COLUMN] = '0' * self.num_columns
         values += columns
 
-        #EDIT ->
         #for i in range(self.total_columns):
             # check if the base page fully has room for each column. if any of them don't, we need to move on to the next base page
-        
         # -> for loop takes more time so redo it//redundant
         #    only nned to check once rather than looping; change .has_capacity(i) to Entry Size = 8 since constant
         if not page_range.base_pages[page_range.basePageToWrite][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
@@ -90,11 +88,9 @@ class Table:
             page_range.base_pages[page_range.basePageToWrite][i].write(values[i])
         # ----------------------------------------------------------------------
 
-        #EDIT ->
         # add the values to the index. for now just index the primary key
         #for i in range(self.num_columns):
         #    self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
-        
         # -> for loop will take  O(n) time so longer needed, 
         #    since we just want to index primary key dont need the whole for loop so O(1) time
         self.index.insert_record(values[RID_COLUMN], values[self.key + METADATA_COLUMNS], self.key)
@@ -131,27 +127,46 @@ class Table:
 
         # set the schema encoding bits
         # ensure schema_encoding has length equal to the table's number of columns
-        schema_encoding = ""
+        
+        #calls the same str multiple times each add on:
+        #schema_encoding = ""
+        #for i in range(self.num_columns):
+            # if the caller provided a value for this column and it's not None, mark as updated
+        #    if i < len(columns) and (columns[i] is not None):
+        #        schema_encoding += '1'
+            # column not being updated
+        #    else:
+        #        schema_encoding += '0'
+        #values[SCHEMA_ENCODING_COLUMN] = schema_encoding
+        #-> will just need to add to list rather than reproduce and add
+        schema_encoding = []
         for i in range(self.num_columns):
             # if the caller provided a value for this column and it's not None, mark as updated
             if i < len(columns) and (columns[i] is not None):
-                schema_encoding += '1'
+                schema_encoding.append('1')
             # column not being updated
             else:
-                schema_encoding += '0'
-        values[SCHEMA_ENCODING_COLUMN] = schema_encoding
+                schema_encoding.append('0')
+        #join with '' since cant leave schema_encoding in list form, must be string
+        values[SCHEMA_ENCODING_COLUMN] = ''.join(schema_encoding)
+
 
         base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
         #base_schema = base_schema.decode()
 
         # --------- check if first time update, if so, insert that tail record -----------
+       
+        new_indirection = self.read(INDIRECTION_COLUMN, baseRID)
+        #edit: bring vars from loop//removes duplicated reads in loop
+        page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+        page_range = self.page_ranges[page_range_index]
         
         for i in range(len(columns)):
             if base_schema[i] == '0' and columns[i] != None: # check if this column has ever been updated before, and that we are trying to update it
                 first_update = [None] * (METADATA_COLUMNS + len(columns))
                 first_update[RID_COLUMN] = self.getNewRID()
 
-                new_indirection = self.read(INDIRECTION_COLUMN, baseRID)
+                #new_indirection = self.read(INDIRECTION_COLUMN, baseRID) //move out of for loop
                 if new_indirection == None or new_indirection == 0: # base has no updates yet
                     first_update[INDIRECTION_COLUMN] = baseRID # (1) base rid becomes tail's indirection value
                 else: # base already had an update
@@ -159,20 +174,29 @@ class Table:
                 self.replace(baseRID, INDIRECTION_COLUMN, first_update[RID_COLUMN]) # (2) update base to newest tail
                 
                 # first_update_schema must reflect all columns (length = num_columns)
-                first_update_schema = ""
-                for j in range(self.num_columns):
-                    if j == i:
-                        first_update_schema += "1"
-                    else:
-                        first_update_schema += "0"
-                first_update[SCHEMA_ENCODING_COLUMN] = first_update_schema
+                #first_update_schema = ""
+                #for j in range(self.num_columns):
+                #    if j == i:
+                #       first_update_schema += "1"
+                #    else:
+                #        first_update_schema += "0"
+                #first_update[SCHEMA_ENCODING_COLUMN] = first_update_schema
+                
+                #-> to not have it as a string and skip a for loop
+                first_update_schema = ['0'] * self.num_columns
+                #since we only want first(one) update only need this
+                first_update_schema[i] = "1"
+                #convert to string so there isnt an error
+                first_update[SCHEMA_ENCODING_COLUMN] = ''.join(first_update_schema)
+                
                 first_update[TIMESTAMP_COLUMN] = self.read(TIMESTAMP_COLUMN, baseRID)
                 first_update[i + 4] = self.read(i + 4, baseRID)
 
                 # insert this first update into the tail page
                 
-                page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
-                page_range = self.page_ranges[page_range_index]
+                #this is repetitive//move out of loop
+                    #page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+                    #page_range = self.page_ranges[page_range_index]
                 last_tail_page = len(page_range.tail_pages) - 1
 
                 # check for space, might be redundant checking every column
@@ -189,25 +213,35 @@ class Table:
                 for j in range(self.total_columns):
                     page_offsets[j] = page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
                     page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
-
+               
                 # add the mapping to the page directory
                 page_range_index = self.page_ranges.index(page_range) # find the index of the page range we've been looking at
                 for j in range(self.total_columns):
-                    # the page range index is the one our base record being updated is in
-                    # the page is the first available tail page, so the last one 
-                    # use the page offsets that were saved earlier 
-                    # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
+                            # the page range index is the one our base record being updated is in
+                            # the page is the first available tail page, so the last one 
+                            # use the page offsets that were saved earlier 
+                            # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
                     self.page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[j])
 
         # change base record's schema encoding value
-        base_schema_encoding = ""
+        #base_schema_encoding = ""
+        #for i in range(len(columns)):
+        #    if schema_encoding[i] == '1' or base_schema[i] == '1': # checks if new update updates x column or previous updates have previously done so 
+        #        base_schema_encoding += '1'
+        #    else:
+        #        base_schema_encoding += '0'
+        #-> change to list from str for consistency        
+        base_schema_encoding = []
         for i in range(len(columns)):
-            if schema_encoding[i] == '1' or base_schema[i] == '1': # checks if new update updates x column or previous updates have previously done so 
-                base_schema_encoding += '1'
+#           checks if new update updates x column or previous updates have previously done so             
+            if schema_encoding[i] == '1' or base_schema[i] == '1':
+                base_schema_encoding.append('1')
             else:
-                base_schema_encoding += '0'
-                
-        self.replace(baseRID, SCHEMA_ENCODING_COLUMN, base_schema_encoding)
+                base_schema_encoding.append('0')
+
+        self.replace(baseRID, SCHEMA_ENCODING_COLUMN, ''.join(base_schema_encoding))
+
+
 
         # ready the tail record with new values 
         values += columns
@@ -230,17 +264,23 @@ class Table:
         # # inserting the actual newest tail record 
         # # check each column. if it is the first update of that column, we need to insert a tail record that copies the original data
         # # no matter what, we always have to insert the actual new tail record
-        
 
 
         #---- adding actual update ----------------------------
-
-        current_base_indirection = self.read(INDIRECTION_COLUMN, baseRID)
-        if current_base_indirection == None or current_base_indirection == 0:
+        
+        #new_indirection == current_base_indirection so it is repetitive to reread:
+        #current_base_indirection = self.read(INDIRECTION_COLUMN, baseRID)
+        #if current_base_indirection == None or current_base_indirection == 0:
+            #values[INDIRECTION_COLUMN] = baseRID  # Point to base if no previous updates
+        #else:
+            #values[INDIRECTION_COLUMN] = current_base_indirection  # Point to previous tail
+        #->just use new_indirection rather than repeat call for current_base_indirection
+        if new_indirection == None or new_indirection == 0:
             values[INDIRECTION_COLUMN] = baseRID  # Point to base if no previous updates
         else:
-            values[INDIRECTION_COLUMN] = current_base_indirection  # Point to previous tail
+            values[INDIRECTION_COLUMN] = new_indirection  # Point to previous tail
         
+
         # update base to point to this new tail record
         self.replace(baseRID, INDIRECTION_COLUMN, values[RID_COLUMN])
         
@@ -248,13 +288,15 @@ class Table:
         page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
         page_range = self.page_ranges[page_range_index]
         last_tail_page = len(page_range.tail_pages) - 1
+        
+        
         for i in range(self.total_columns):
             # check if the last tail page fully has room for each column. if any of them don't, we need to allocate a new tail page
             if not page_range.tail_pages[last_tail_page][i].has_capacity(8): # len(values[i]) is future proofing  -DH
                 page_range.allocate_new_tail_page() 
                 last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
                 break
-        
+
         # can safely write the entire tail record into the tail page of the selected page range
         page_offsets = [None] * self.total_columns # save the page offsets for each column for later
         for i in range(self.total_columns):
