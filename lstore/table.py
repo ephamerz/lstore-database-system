@@ -126,8 +126,8 @@ class Table:
         RIDs = self.index.locate(self.key, primary_key) 
         if len(RIDs) == 0: # record does not exist
             return False 
-        # no-op fast path
-        if not any(v is not None for v in columns):
+        # if nothing just return early
+        if not any(i != None for i in columns):
             return True
         # if the record exists there should only be one item in the list because primary keys are unique
         baseRID = RIDs[0]
