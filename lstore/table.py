@@ -121,6 +121,9 @@ class Table:
     # columns: an array of the columns with values we want the record to be updated to. does not include the 4 metadata columns so we need to calculate those ourselves
     """
     def update_record(self, primary_key, columns):
+        if columns[self.key] is not None: # if we're trying to update the key value, which is not allowed
+            return False
+        
         index = self.index
         key_col = self.key
         RIDs = index.locate(key_col, primary_key) 
