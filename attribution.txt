@@ -2,4 +2,4 @@ Dylan Hoang: 20%, Implemented table.py, page.py, query.py with updating records,
 Amrutha Tummala: 20% Created data structure for index.py, Implemented table.py insert and update functions
 Nadia Bourne: 20%, Wrote db.py & tail traversal helper method in table.py
 Ethan Pham: 20%, Implemented original query.py functions, edited tail traversal methods and caching needed records
-Risha Chaudri: 20%, Implemented original query.py functions
+Risha Chaudri: 20%, Implemented original query.py functions, edited update
