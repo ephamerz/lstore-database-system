@@ -41,6 +41,7 @@ class Table:
         self.key = key
         self.num_columns = num_columns 
         self.total_columns = num_columns + METADATA_COLUMNS # + 4 for rid, indirection, schema, timestamping. these 4 columns are internal to table
+        self.empty_schema = '0' * self.num_columns #replaces repeated '0' * self.num_cols during inserts
         self.page_directory = {} # key: column, RID --> value: page_range, page, page_offset
         self.page_ranges = []
         self.index = Index(self)
@@ -56,36 +57,46 @@ class Table:
     # columns: an array of the columns with values we want to insert. does not include the 4 metadata columns so we need to calculate those ourselves
     """
     def insert_new_record(self, columns):
+        page_ranges = self.page_ranges
+        total_columns = self.total_columns
+        empty_schema = self.empty_schema #call to reduce repititions
+        page_directory = self.page_directory
+        page_range = page_ranges[-1] # the page range we want to write to is the last one in the array
         
-        page_range = self.page_ranges[len(self.page_ranges)-1] # the page range we want to write to is the last one in the array
         # initialize an array with the complete list of data values to insert (metadata values + the record's values)
         values = [0] * METADATA_COLUMNS
         values[INDIRECTION_COLUMN] = 0 # not needed but included for clarity
-        values[RID_COLUMN] = self.getNewRID()
+        rid = self.getNewRID()
+        values[RID_COLUMN] = rid
         values[TIMESTAMP_COLUMN] = time.time()
-        values[SCHEMA_ENCODING_COLUMN] = '0' * self.num_columns
+        values[SCHEMA_ENCODING_COLUMN] = empty_schema
         values += columns
 
         #for i in range(self.total_columns):
             # check if the base page fully has room for each column. if any of them don't, we need to move on to the next base page
         # -> for loop takes more time so redo it//redundant
         #    only nned to check once rather than looping; change .has_capacity(i) to Entry Size = 8 since constant
-        if not page_range.base_pages[page_range.basePageToWrite][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
-            page_range.basePageToWrite += 1 
+        base_pages = page_range.base_pages
+        base_idx = page_range.basePageToWrite
+        if not base_pages[base_idx][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
+            base_idx += 1 
+            page_range.basePageToWrite = base_idx
        
         # if the page range is full, then allocate a new page range
-            if page_range.basePageToWrite >= MAX_BASE_PAGES:
-                self.page_ranges.append(PageRange(self.total_columns))
-                page_range = self.page_ranges[len(self.page_ranges)-1]
+            if base_idx >= MAX_BASE_PAGES:
+                page_ranges.append(PageRange(total_columns))
+                page_range = page_ranges[-1]
+                base_pages = page_range.base_pages
+                base_idx = page_range.basePageToWrite
 
         # ---- THIS NEEDS TO BE REVISITED as all milestones have all columns as 64 bit integers, no strings or anything
         # can safely write the entire base record into the base page of the selected page range
         
-        page_offsets = [None] * self.total_columns # save the page offsets for each column for later
+        page_offsets = [None] * total_columns # save the page offsets for each column for later
         
-        for i in range(self.total_columns):
-            page_offsets[i] = page_range.base_pages[page_range.basePageToWrite][i].page_size
-            page_range.base_pages[page_range.basePageToWrite][i].write(values[i])
+        for i in range(total_columns):
+            page_offsets[i] = base_pages[base_idx][i].page_size
+            base_pages[base_idx][i].write(values[i])
         # ----------------------------------------------------------------------
 
         # add the values to the index. for now just index the primary key
@@ -96,12 +107,13 @@ class Table:
         self.index.insert_record(values[RID_COLUMN], values[self.key + METADATA_COLUMNS], self.key)
 
         # add the mapping to the page directory
-        page_range_index = len(self.page_ranges)-1
-        for i in range(self.total_columns):
+        page_range_index = len(page_ranges)-1
+        for i in range(total_columns):
             # the page range index is always the same.
             # the page is always the same since a record is aligned across the base page thus requiring them all to be written on the same page index in their columns
             # use the page offsets that were saved earlier
-            self.page_directory[(i, values[RID_COLUMN])] = (page_range_index, page_range.basePageToWrite, page_offsets[i])
+            page_directory[(i, rid)] = (page_range_index, base_idx, page_offsets[i])
+        
         return True
     
     """
@@ -109,11 +121,21 @@ class Table:
     # columns: an array of the columns with values we want the record to be updated to. does not include the 4 metadata columns so we need to calculate those ourselves
     """
     def update_record(self, primary_key, columns):
-        RIDs = self.index.locate(self.key, primary_key) 
+        index = self.index
+        key_col = self.key
+        RIDs = index.locate(key_col, primary_key) 
         if len(RIDs) == 0: # record does not exist
             return False 
+        # no-op fast path
+        if not any(v is not None for v in columns):
+            return True
         # if the record exists there should only be one item in the list because primary keys are unique
         baseRID = RIDs[0]
+        read = self.read
+        replace = self.replace
+        page_directory = self.page_directory
+        page_ranges = self.page_ranges
+        total_columns = self.total_columns
 
         # read the indirection value's location in the base pages
         # we do this because we need to access the old version of the record and also link up the new tail page with the old tail page pointer
@@ -127,22 +149,13 @@ class Table:
 
         # set the schema encoding bits
         # ensure schema_encoding has length equal to the table's number of columns
-        
         #calls the same str multiple times each add on:
-        #schema_encoding = ""
-        #for i in range(self.num_columns):
-            # if the caller provided a value for this column and it's not None, mark as updated
-        #    if i < len(columns) and (columns[i] is not None):
-        #        schema_encoding += '1'
-            # column not being updated
-        #    else:
-        #        schema_encoding += '0'
-        #values[SCHEMA_ENCODING_COLUMN] = schema_encoding
         #-> will just need to add to list rather than reproduce and add
         schema_encoding = []
+        num_cols_update = len(columns)
         for i in range(self.num_columns):
             # if the caller provided a value for this column and it's not None, mark as updated
-            if i < len(columns) and (columns[i] is not None):
+            if i < num_cols_update and (columns[i] is not None):
                 schema_encoding.append('1')
             # column not being updated
             else:
@@ -150,96 +163,77 @@ class Table:
         #join with '' since cant leave schema_encoding in list form, must be string
         values[SCHEMA_ENCODING_COLUMN] = ''.join(schema_encoding)
 
-
-        base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
+        base_schema = read(SCHEMA_ENCODING_COLUMN, baseRID)
         #base_schema = base_schema.decode()
 
         # --------- check if first time update, if so, insert that tail record -----------
        
-        new_indirection = self.read(INDIRECTION_COLUMN, baseRID)
         #edit: bring vars from loop//removes duplicated reads in loop
-        page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
-        page_range = self.page_ranges[page_range_index]
+        new_indirection = read(INDIRECTION_COLUMN, baseRID)
+        page_range_index = page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+        page_range = page_ranges[page_range_index]
         
-        for i in range(len(columns)):
+        first_update_cols = []
+        for i in range(num_cols_update):
             if base_schema[i] == '0' and columns[i] != None: # check if this column has ever been updated before, and that we are trying to update it
-                first_update = [None] * (METADATA_COLUMNS + len(columns))
-                first_update[RID_COLUMN] = self.getNewRID()
+                first_update_cols.append(i)
 
-                #new_indirection = self.read(INDIRECTION_COLUMN, baseRID) //move out of for loop
-                if new_indirection == None or new_indirection == 0: # base has no updates yet
-                    first_update[INDIRECTION_COLUMN] = baseRID # (1) base rid becomes tail's indirection value
-                else: # base already had an update
-                    first_update[INDIRECTION_COLUMN] = new_indirection  # (1) whatever was in the indirection column of base goes into first_updates indirection
-                self.replace(baseRID, INDIRECTION_COLUMN, first_update[RID_COLUMN]) # (2) update base to newest tail
-                
-                # first_update_schema must reflect all columns (length = num_columns)
-                #first_update_schema = ""
-                #for j in range(self.num_columns):
-                #    if j == i:
-                #       first_update_schema += "1"
-                #    else:
-                #        first_update_schema += "0"
-                #first_update[SCHEMA_ENCODING_COLUMN] = first_update_schema
-                
-                #-> to not have it as a string and skip a for loop
-                first_update_schema = ['0'] * self.num_columns
-                #since we only want first(one) update only need this
+        if first_update_cols:
+            first_update = [None] * (METADATA_COLUMNS + len(columns))
+            first_update[RID_COLUMN] = self.getNewRID()
+
+            if new_indirection == None or new_indirection == 0: # base has no updates yet
+                first_update[INDIRECTION_COLUMN] = baseRID # (1) base rid becomes tail's indirection value
+            else: # base already had an update
+                first_update[INDIRECTION_COLUMN] = new_indirection  # (1) whatever was in the indirection column of base goes into first_updates indirection
+            replace(baseRID, INDIRECTION_COLUMN, first_update[RID_COLUMN]) # (2) update base to newest tail
+            
+            # first_update_schema must reflect all columns (length = num_columns)
+            #-> to not have it as a string and skip a for loop
+            first_update_schema = ['0'] * self.num_columns
+            for i in first_update_cols:
                 first_update_schema[i] = "1"
-                #convert to string so there isnt an error
-                first_update[SCHEMA_ENCODING_COLUMN] = ''.join(first_update_schema)
-                
-                first_update[TIMESTAMP_COLUMN] = self.read(TIMESTAMP_COLUMN, baseRID)
-                first_update[i + 4] = self.read(i + 4, baseRID)
+            #convert to string so there isnt an error
+            first_update[SCHEMA_ENCODING_COLUMN] = ''.join(first_update_schema)
 
-                # insert this first update into the tail page
-                
-                #this is repetitive//move out of loop
-                    #page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
-                    #page_range = self.page_ranges[page_range_index]
-                last_tail_page = len(page_range.tail_pages) - 1
+            first_update[TIMESTAMP_COLUMN] = read(TIMESTAMP_COLUMN, baseRID)
+            for i in first_update_cols:
+                first_update[i + 4] = read(i + 4, baseRID)
 
-                # check for space, might be redundant checking every column
-                for j in range(self.total_columns):
-                    # check if the last tail page fully has room for each column. if any of them don't, we need to allocate a new tail page
-                    if not page_range.tail_pages[last_tail_page][j].has_capacity(8): # len(values[i]) is future proofing  -DH
-                        page_range.allocate_new_tail_page() 
-                        # FIXED: tail_page should be tail_pages
-                        last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
-                        break
-                
-                # can safely write the entire tail record into the tail page of the selected page range
-                page_offsets = [None] * self.total_columns # save the page offsets for each column for later
-                for j in range(self.total_columns):
-                    page_offsets[j] = page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
-                    page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
-               
-                # add the mapping to the page directory
-                page_range_index = self.page_ranges.index(page_range) # find the index of the page range we've been looking at
-                for j in range(self.total_columns):
-                            # the page range index is the one our base record being updated is in
-                            # the page is the first available tail page, so the last one 
-                            # use the page offsets that were saved earlier 
-                            # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-                    self.page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[j])
+            # insert this first update into the tail page
+            
+            last_tail_page = len(page_range.tail_pages) - 1
+
+            # check for space; tail pages are aligned, so one column check is sufficient
+            if not page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
+                page_range.allocate_new_tail_page() 
+                # FIXED: tail_page should be tail_pages
+                last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
+            
+            # can safely write the entire tail record into the tail page of the selected page range
+            page_offsets = [None] * total_columns # save the page offsets for each column for later
+            for j in range(total_columns):
+                page_offsets[j] = page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
+                page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
+           
+            # add the mapping to the page directory
+            for j in range(total_columns):
+                        # the page range index is the one our base record being updated is in
+                        # the page is the first available tail page, so the last one 
+                        # use the page offsets that were saved earlier 
+                        # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
+                page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[j])
 
         # change base record's schema encoding value
-        #base_schema_encoding = ""
-        #for i in range(len(columns)):
-        #    if schema_encoding[i] == '1' or base_schema[i] == '1': # checks if new update updates x column or previous updates have previously done so 
-        #        base_schema_encoding += '1'
-        #    else:
-        #        base_schema_encoding += '0'
         #-> change to list from str for consistency        
         base_schema_encoding = []
-        for i in range(len(columns)):
+        for i in range(num_cols_update):
 #           checks if new update updates x column or previous updates have previously done so             
             if schema_encoding[i] == '1' or base_schema[i] == '1':
                 base_schema_encoding.append('1')
             else:
                 base_schema_encoding.append('0')
-
-        self.replace(baseRID, SCHEMA_ENCODING_COLUMN, ''.join(base_schema_encoding))
+        replace(baseRID, SCHEMA_ENCODING_COLUMN, ''.join(base_schema_encoding))
 
 
 
@@ -269,11 +263,6 @@ class Table:
         #---- adding actual update ----------------------------
         
         #new_indirection == current_base_indirection so it is repetitive to reread:
-        #current_base_indirection = self.read(INDIRECTION_COLUMN, baseRID)
-        #if current_base_indirection == None or current_base_indirection == 0:
-            #values[INDIRECTION_COLUMN] = baseRID  # Point to base if no previous updates
-        #else:
-            #values[INDIRECTION_COLUMN] = current_base_indirection  # Point to previous tail
         #->just use new_indirection rather than repeat call for current_base_indirection
         if new_indirection == None or new_indirection == 0:
             values[INDIRECTION_COLUMN] = baseRID  # Point to base if no previous updates
@@ -282,24 +271,22 @@ class Table:
         
 
         # update base to point to this new tail record
-        self.replace(baseRID, INDIRECTION_COLUMN, values[RID_COLUMN])
+        replace(baseRID, INDIRECTION_COLUMN, values[RID_COLUMN])
         
         # get the page range from the base page
-        page_range_index = self.page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
-        page_range = self.page_ranges[page_range_index]
+        page_range_index = page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+        page_range = page_ranges[page_range_index]
         last_tail_page = len(page_range.tail_pages) - 1
         
         
-        for i in range(self.total_columns):
-            # check if the last tail page fully has room for each column. if any of them don't, we need to allocate a new tail page
-            if not page_range.tail_pages[last_tail_page][i].has_capacity(8): # len(values[i]) is future proofing  -DH
-                page_range.allocate_new_tail_page() 
-                last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
-                break
+        # check if the last tail page fully has room for the record (aligned pages)
+        if not page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
+            page_range.allocate_new_tail_page() 
+            last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
 
         # can safely write the entire tail record into the tail page of the selected page range
-        page_offsets = [None] * self.total_columns # save the page offsets for each column for later
-        for i in range(self.total_columns):
+        page_offsets = [None] * total_columns # save the page offsets for each column for later
+        for i in range(total_columns):
             page_offsets[i] = page_range.tail_pages[last_tail_page][i].page_size # done so since page sizes might differ due to None values
             page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
 
@@ -307,46 +294,48 @@ class Table:
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
 
         # add the mapping to the page directory
-        page_range_index = self.page_ranges.index(page_range) # find the index of the page range we've been looking at
-        for i in range(self.total_columns):
+        for i in range(total_columns):
             # the page range index is the one our base record being updated is in
             # the page is the first available tail page, so the last one 
             # use the page offsets that were saved earlier 
             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-            self.page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
+            page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
         #------------------------------------
 
         return True
 
     def delete_record(self, primary_key):
-        RIDs = self.index.locate(self.key, primary_key) 
+        index = self.index
+        key_col = self.key
+        read = self.read
+        replace = self.replace
+        RIDs = index.locate(key_col, primary_key) 
         if len(RIDs) == 0: # record does not exist
             return False 
         baseRID = RIDs[0]
-        record_to_delete = self.read(INDIRECTION_COLUMN, baseRID) # get the newest tail
+        record_to_delete = read(INDIRECTION_COLUMN, baseRID) # get the newest tail
         
         while 1:
             # check for both 0 and None since we write 0 for "no indirection"
             if record_to_delete == None or record_to_delete == 0: # if no tail records
                 break
-            next_record = self.read(INDIRECTION_COLUMN, record_to_delete) # save the next record down the pointer stream
-            self.replace(record_to_delete, RID_COLUMN, self.read(RID_COLUMN, record_to_delete) * -1) # multiply by -1 to mark for deletion
+            next_record = read(INDIRECTION_COLUMN, record_to_delete) # save the next record down the pointer stream
+            rid_value = read(RID_COLUMN, record_to_delete)
+            replace(record_to_delete, RID_COLUMN, rid_value * -1) # multiply by -1 to mark for deletion
             record_to_delete = next_record # move onto the next record
             if next_record == baseRID: # if we reach base record
                 break
-        self.replace(baseRID, RID_COLUMN, baseRID * -1) # mark base record for death.
+        replace(baseRID, RID_COLUMN, baseRID * -1) # mark base record for death.
 
         return True
 
-
-
     # replaces value in specified column and RID
     def replace(self, RID, column_for_replace, value): 
+        #save time calling these
         location = self.page_directory.get((column_for_replace, RID))
         page_range_index = location[0]
         page_index = location[1]
         page_offset = location[2]
-        
         
         page_range = self.page_ranges[page_range_index]
         # Check if this is a base page (page_index < MAX_BASE_PAGES) or tail page
@@ -354,38 +343,39 @@ class Table:
             page_range.base_pages[page_index][column_for_replace].replace(value, page_offset)
         else:
             # For tail pages, need to adjust the index
-            tail_page_index = page_index - MAX_BASE_PAGES if page_index >= MAX_BASE_PAGES else page_index
+            tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
             page_range.tail_pages[tail_page_index][column_for_replace].replace(value, page_offset)
 
     # passes in column and RID desired, gets address of page range, base page, page offset, returns value 
     def read(self, column_to_read, RID):
-        location = self.page_directory.get((column_to_read, RID))
-        if location is None:
+        #save time calling these
+        page_directory = self.page_directory
+        page_ranges = self.page_ranges
+        location = page_directory.get((column_to_read, RID))
+        
+        if location == None:
             return None
+        
         page_range_index = location[0]
         page_index = location[1]
         page_offset = location[2]
+        page_range = page_ranges[page_range_index]
         
-        page_range = self.page_ranges[page_range_index]
         if page_index < MAX_BASE_PAGES:
             read_value = page_range.base_pages[page_index][column_to_read].read(page_offset)
         else:
-            tail_page_index = page_index - MAX_BASE_PAGES if page_index >= MAX_BASE_PAGES else page_index
+            tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
             read_value = page_range.tail_pages[tail_page_index][column_to_read].read(page_offset)
         
-        # convert bytes to int for all columns except SCHEMA_ENCODING_COLUMN
-        # if read_value is not None and column_to_read != SCHEMA_ENCODING_COLUMN:
-        #     read_value = int.from_bytes(read_value, byteorder='little')
-
-        if read_value is not None and column_to_read == SCHEMA_ENCODING_COLUMN:
-            read_value = read_value.decode()
-        elif read_value is not None and column_to_read == TIMESTAMP_COLUMN:
-            read_value = struct.unpack('<d', read_value)[0]
-        elif read_value is not None:
-            read_value = int.from_bytes(read_value, byteorder='little')
-
-        
-        return read_value
+        #if it isnt there just return now
+        if read_value == None:
+            return None
+        #reduce unneeded assignem,ents    
+        if column_to_read == SCHEMA_ENCODING_COLUMN:
+            return read_value.decode()
+        if column_to_read == TIMESTAMP_COLUMN:
+            return struct.unpack('<d', read_value)[0]
+        return int.from_bytes(read_value, byteorder='little')
 
     def getNewRID(self):
         RID = self.RID_counter
@@ -451,6 +441,12 @@ class Table:
         col_contents = self.read(physical_col_idx, baseRID)
         return col_contents
     
+    """
+        Efficiently retrieves multiple column values for any RID.
+    """
+    # @:param rid: the base RID of the record
+    # @:param col_indices: list of user column indicies
+    # @:param relative_version: 0 for latest, (-) for previous versions
     def get_values_by_rid(self, rid, col_indices, relative_version):
         """
         Efficiently retrieves multiple column values for any RID.
@@ -460,11 +456,12 @@ class Table:
         :param relative_version: 0 for latest, (-) for previous versions
         """
         result =[]  # list of values in same order as col_indices
+        read = self.read
 
         if relative_version == 0:
             # latest version, read base schema
-            base_schema = self.read(SCHEMA_ENCODING_COLUMN, rid)
-            indirection_rid = self.read(INDIRECTION_COLUMN, rid)    # read base indirection once to get latest values from newest tail record
+            base_schema = read(SCHEMA_ENCODING_COLUMN, rid)
+            indirection_rid = read(INDIRECTION_COLUMN, rid)    # read base indirection once to get latest values from newest tail record
 
             # for each requested column, decide whether we should read from base, or from latest tail record
             for col_idx in col_indices:
@@ -472,20 +469,20 @@ class Table:
                 # check if the column was ever updated
                 if base_schema[col_idx] == '0':
                     # never updated, so read from the base
-                    result.append(self.read(physical_col_idx, rid))
+                    result.append(read(physical_col_idx, rid))
                 # if the schema says it was updated, but no tail chain, continue to read from base
                 elif indirection_rid is None or indirection_rid == 0:
                     # schema is updated but no tail exists, so read from base
-                    result.append(self.read(physical_col_idx, rid))
+                    result.append(read(physical_col_idx, rid))
                 else:
                     # check if the latest tail has the column
-                    tail_schema = self.read(SCHEMA_ENCODING_COLUMN, indirection_rid)
+                    tail_schema = read(SCHEMA_ENCODING_COLUMN, indirection_rid)
                     # if newest tail has the column, it becomes the latest value
                     if tail_schema[col_idx] == '1':
-                        result.append(self.read(physical_col_idx, indirection_rid))
+                        result.append(read(physical_col_idx, indirection_rid))
                     else:
                         # case where newest tail doesn't have the column, latest value stays from base record
-                        result.append(self.read(physical_col_idx, rid))
+                        result.append(read(physical_col_idx, rid))
         else:
             # using rabbit_hunt with the base_rid
             for col_idx in col_indices:

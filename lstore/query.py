@@ -54,11 +54,13 @@ class Query:
         # schema_encoding = '0' * self.table.num_columns
         # primary_key = columns[self.table.key]
         # rid = len(self.table.page_directory)
-        RIDs = self.table.index.locate(self.table.key, columns[self.table.key]) 
+        table = self.table
+        index = table.index
+        key_column = table.key
+        RIDs = index.locate(key_column, columns[key_column]) 
         if len(RIDs) >= 1:
              return False
 
-        
         # try: 
         #     #insert address to directory to get to the columns
         #     self.table.page_directory[rid] = columns # tuple of column and RID
@@ -68,7 +70,7 @@ class Query:
         
         # except:
         #     return False  
-        return self.table.insert_new_record(columns)     
+        return table.insert_new_record(columns)     
         
         
 
@@ -87,31 +89,38 @@ class Query:
         #rid key map
         # get one RID
         # get RID of base record, then access indirection and get tail record, 
-            #  get specified column data we want
-        rids = self.table.index.locate(search_key_index, search_key)
+        #get specified column data we want
+        table = self.table
+        index = table.index
+        read = table.read
+        rids = index.locate(search_key_index, search_key)
         
         #no needed since select wont call key that DNE
         #if len(rids) == 0:
         #    return False
         
         rid = rids[0]
-
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
-        vals = self.table.get_values_by_rid(rid, cols, 0)   # 0 = latest
+        base_schema = read(3, rid)
+        indirection_rid = read(0, rid)
+        tail_schema = None
+        if indirection_rid is not None and indirection_rid != 0:
+            tail_schema = read(3, indirection_rid)
+
+        vals = []
+        for col_idx in cols:
+            physical_col_idx = col_idx + 4
+            if base_schema[col_idx] == '0' or indirection_rid is None or indirection_rid == 0:
+                vals.append(read(physical_col_idx, rid))
+            else:
+                if tail_schema is not None and tail_schema[col_idx] == '1':
+                    vals.append(read(physical_col_idx, indirection_rid))
+                else:
+                    vals.append(read(physical_col_idx, rid))
 
         return [Record(rid, search_key, vals)]
 
 
-    """
-    # Read matching record with specified search key
-    # :param search_key: the value you want to search based on
-    # :param search_key_index: the column index you want to search based on
-    # :param projected_columns_index: what columns to return. array of 1 or 0 values.
-    # :param relative_version: the relative version of the record you need to retreive.
-    # Returns a list of Record objects upon success
-    # Returns False if record locked by TPL
-    # Assume that select will never be called on a key that doesn't exist
-    """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
         #introduce some sort of rab bit hunting through the tail records, 
             # as well as checking what values we have gathered already
@@ -126,7 +135,6 @@ class Query:
         #    return False
         
         rid = rids[0]
-
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
         vals = self.table.get_values_by_rid(rid, cols, relative_version)  
 
