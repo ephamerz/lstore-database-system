@@ -49,6 +49,7 @@ class Table:
         self.merge_threshold_pages = 50  # The threshold to trigger a merge
         self.merge_set = [] # holds tail records until 50 records, then add queue
         self.merge_queue = Queue() # used by merge thread
+        self.deallocation_queue = Queue() # deallocate everything here
 
         self.RID_counter = 0 # counter for assigning RIDs
         self.page_ranges.append(PageRange(self.total_columns)) # create initial page range
