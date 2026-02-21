@@ -2,7 +2,7 @@
 import struct
 
 CAPACITY = 4096
-MANDATORY_COLUMNS = 4
+MANDATORY_COLUMNS = 5
 MAX_BASE_PAGES = 16
 ENTRY_SIZE = 8 # 8 bytes
 
@@ -37,6 +37,9 @@ class Page:
                 self.page_size += ENTRY_SIZE
             return True
         return False
+    
+    def readWholePage(self):
+        return self.data
     
     def read(self, lower_index):
         upper_index = lower_index + ENTRY_SIZE
