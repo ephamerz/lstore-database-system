@@ -41,7 +41,7 @@ class Query:
         # #if locked
         # except: 
         #     return False
-        self.table.delete_record(primary_key)
+        return self.table.delete_record(primary_key)
     
     
     """
@@ -54,11 +54,13 @@ class Query:
         # schema_encoding = '0' * self.table.num_columns
         # primary_key = columns[self.table.key]
         # rid = len(self.table.page_directory)
-        RIDs = self.table.index.locate(self.table.key, columns[self.table.key]) 
+        table = self.table
+        index = table.index
+        key_column = table.key
+        RIDs = index.locate(key_column, columns[key_column]) 
         if len(RIDs) >= 1:
              return False
 
-        
         # try: 
         #     #insert address to directory to get to the columns
         #     self.table.page_directory[rid] = columns # tuple of column and RID
@@ -68,7 +70,7 @@ class Query:
         
         # except:
         #     return False  
-        return self.table.insert_new_record(columns)     
+        return table.insert_new_record(columns)     
         
         
 
@@ -87,37 +89,38 @@ class Query:
         #rid key map
         # get one RID
         # get RID of base record, then access indirection and get tail record, 
-            #  get specified column data we want
-        rids = self.table.index.locate(search_key_index, search_key)
+        #get specified column data we want
+        table = self.table
+        index = table.index
+        read = table.read
+        rids = index.locate(search_key_index, search_key)
         
         #no needed since select wont call key that DNE
         #if len(rids) == 0:
         #    return False
         
         rid = rids[0]
-        return_columns = []
-        
-        for i in range(len(projected_columns_index)):
-            if projected_columns_index[i] == 1:
-                return_columns.append(self.table.rabbit_hunt(i, search_key, LATEST_VERSION))
-            #dont need
-            #else:
-                #return_columns.append(0)
-        #return a list!! of Record ojs
-        return [Record(rid, search_key, return_columns)]
-    
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        base_schema = read(3, rid)
+        indirection_rid = read(0, rid)
+        tail_schema = None
+        if indirection_rid is not None and indirection_rid != 0:
+            tail_schema = read(3, indirection_rid)
+
+        vals = []
+        for col_idx in cols:
+            physical_col_idx = col_idx + 4
+            if base_schema[col_idx] == '0' or indirection_rid is None or indirection_rid == 0:
+                vals.append(read(physical_col_idx, rid))
+            else:
+                if tail_schema is not None and tail_schema[col_idx] == '1':
+                    vals.append(read(physical_col_idx, indirection_rid))
+                else:
+                    vals.append(read(physical_col_idx, rid))
+
+        return [Record(rid, search_key, vals)]
 
 
-    """
-    # Read matching record with specified search key
-    # :param search_key: the value you want to search based on
-    # :param search_key_index: the column index you want to search based on
-    # :param projected_columns_index: what columns to return. array of 1 or 0 values.
-    # :param relative_version: the relative version of the record you need to retreive.
-    # Returns a list of Record objects upon success
-    # Returns False if record locked by TPL
-    # Assume that select will never be called on a key that doesn't exist
-    """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
         #introduce some sort of rab bit hunting through the tail records, 
             # as well as checking what values we have gathered already
@@ -132,16 +135,10 @@ class Query:
         #    return False
         
         rid = rids[0]
-        return_columns = []
-        
-        for i in range(len(projected_columns_index)):
-            if projected_columns_index[i] == 1:
-                return_columns.append(self.table.rabbit_hunt(i, search_key, relative_version))
-            #can leave out to not add zeros to output
-            #else:
-                #return_columns.append(0)
-        #return a list of Record ojs
-        return [Record(rid, search_key, return_columns)]
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        vals = self.table.get_values_by_rid(rid, cols, relative_version)  
+
+        return [Record(rid, search_key, vals)]
 
 #############
 
@@ -195,25 +192,49 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        total = 0   # starting at 0 count
-        found = False   # making sure there is at least 1 valid record found
-
         try:
-            # going through all of the keys in range
-            for key in range(start_range, end_range + 1):
+            # use the table's index to find all base RIDs with primary key in the range
+            rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+            # if no records, fails
+            if len(rids) == 0:
+                return False
+            # initializing running total count for aggregation
+            total = 0
+            physical_col_idx = aggregate_column_index + 4 # skipping first 4 metadata columns for column index
 
-                # adding values from the most recent versions
-                to_add = self.table.rabbit_hunt(aggregate_column_index, key, LATEST_VERSION)
-                if to_add is not None:
-                    total += to_add
-                found = True
+            # processing each RID directly
+            for rid in rids:
+                # reading base schema to check if the column was ever updated
+                base_schema = self.table.read(3, rid) # 3 for SCHEMA_ENCODING_COLUMN
+                value = None    # placeholder value that is added by sum
+                # if column was never updated, read from base directly
+                if base_schema[aggregate_column_index] == '0':
+                    value = self.table.read(physical_col_idx, rid)
+                else:
+                    # column has updates, so check the tail
+                    indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
+                    # if there is no indirection pointer (0/none), no tail record exists --> go to base record
+                    if indirection_rid is None or indirection_rid == 0:
+                        value = self.table.read(physical_col_idx, rid)
+                    else:
+                        # tail record exists, check whether latest tail actually contains updated value for the column
+                        tail_schema = self.table.read(3, indirection_rid)
+                        # if tail schema bit is '1', tail holds latest value
+                        if tail_schema[aggregate_column_index] == '1':
+                            value = self.table.read(physical_col_idx, indirection_rid)
+                        else:
+                            # base should be the correct record then
+                            value = self.table.read(physical_col_idx, rid)
+                
+                # only add the value to the total if we successfully retrieve a value
+                if value is not None:
+                    total += value
 
-            # return false if no records are found
-            return total if found else False
+            return total
         except:
             return False
+       
 
-        pass
 
     
     """
@@ -226,23 +247,26 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-        # no versions will exist if page_directory stores only 1 tuple per RID
-
-        total = 0   # starting at 0 count
-        found = False   # making sure there is at least 1 valid record found
-
         try:
-            # going through all of the keys in range
-            for key in range(start_range, end_range + 1):
+            # use the table's index to find all base RIDs with primary key in the range
+            rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+            # if no records fall in range
+            if len(rids) == 0:
+                return False
+            
+            total = 0   # initializing running total count for aggregation result
 
-                # adding values from the most recent versions
+            # for each base RID returned in the range
+            for rid in rids:
+                # read primary key value directly from base
+                primary_key = self.table.read(self.table.key + 4, rid)  # +4 for metadata
+                # retrieve the value of aggregate column at requested relative version through rabbit hunt
+                value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
+                # add to total if valud value was returned
+                if value is not None:
+                    total += value
 
-                to_add = self.table.rabbit_hunt(aggregate_column_index, key, relative_version)
-                if to_add is not None:
-                    total += to_add
-                found = True
-            # return false if no records are found
-            return total if found else False
+            return total
         except:
             return False
 
@@ -257,7 +281,10 @@ class Query:
     # Returns False if no record matches key or if target record is locked by 2PL.
     """
     def increment(self, key, column):
-        r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
+        result = self.select(key, self.table.key, [1] * self.table.num_columns)
+        if result is False or len(result) == 0:
+            return False
+        r = result[0]
         if r is not False:
             # creating an update list
             updated_columns = [None] * self.table.num_columns
