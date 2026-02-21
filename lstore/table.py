@@ -8,9 +8,10 @@ INDIRECTION_COLUMN = 0
 RID_COLUMN = 1
 TIMESTAMP_COLUMN = 2
 SCHEMA_ENCODING_COLUMN = 3
+BASE_RID_COLUMN = 4
 
 MAX_BASE_PAGES = 16
-METADATA_COLUMNS = 4
+METADATA_COLUMNS = 5 # indirection, rid, time, schema, baserid
 ENTRY_SIZE = 8 # 8 bytes
 
 class Record:
@@ -74,6 +75,7 @@ class Table:
         values[RID_COLUMN] = rid
         values[TIMESTAMP_COLUMN] = time.time()
         values[SCHEMA_ENCODING_COLUMN] = empty_schema
+        values[BASE_RID_COLUMN] = None
         values += columns
 
         #for i in range(self.total_columns):
@@ -150,6 +152,7 @@ class Table:
         values[INDIRECTION_COLUMN] = None # not needed but included for clarity
         values[RID_COLUMN] = self.getNewRID()
         values[TIMESTAMP_COLUMN] = time.time()
+        values[BASE_RID_COLUMN] = baseRID
 
         # set the schema encoding bits
         # ensure schema_encoding has length equal to the table's number of columns
@@ -185,6 +188,7 @@ class Table:
         if first_update_cols:
             first_update = [None] * (METADATA_COLUMNS + len(columns))
             first_update[RID_COLUMN] = self.getNewRID()
+            first_update[BASE_RID_COLUMN] = baseRID
 
             if new_indirection == None or new_indirection == 0: # base has no updates yet
                 first_update[INDIRECTION_COLUMN] = baseRID # (1) base rid becomes tail's indirection value
@@ -202,7 +206,7 @@ class Table:
 
             first_update[TIMESTAMP_COLUMN] = read(TIMESTAMP_COLUMN, baseRID)
             for i in first_update_cols:
-                first_update[i + 4] = read(i + 4, baseRID)
+                first_update[i + METADATA_COLUMNS] = read(i + METADATA_COLUMNS, baseRID)
 
             # insert this first update into the tail page
             
@@ -374,8 +378,15 @@ class Table:
 
 
     def merge(self):
-        print("merge is happening")
         pass
+        print("merge is starting")
+        while (1):
+            if self.merge_queue > 0:
+                batch_tail_page = self.merge_queue.get()
+
+    def getBasePageCopy(self, tail_pages):
+        pass
+        
         
 
     """
