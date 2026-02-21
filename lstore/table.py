@@ -1,6 +1,7 @@
 from lstore.index import Index
 import time
 import struct
+from queue import Queue 
 from lstore.page import Page, PageRange
 
 INDIRECTION_COLUMN = 0
@@ -46,6 +47,8 @@ class Table:
         self.page_ranges = []
         self.index = Index(self)
         self.merge_threshold_pages = 50  # The threshold to trigger a merge
+        self.merge_set = [] # holds tail records until 50 records, then add queue
+        self.merge_queue = Queue() # used by merge thread
 
         self.RID_counter = 0 # counter for assigning RIDs
         self.page_ranges.append(PageRange(self.total_columns)) # create initial page range
@@ -139,7 +142,7 @@ class Table:
 
         # read the indirection value's location in the base pages
         # we do this because we need to access the old version of the record and also link up the new tail page with the old tail page pointer
-        # indirection_pointer = self.read(INDIRECTION_COLUMN, baseRID) # latest tail record
+
 
         # initialize an array with the complete list of data values to insert (metadata values + the record's values)
         values = [None] * METADATA_COLUMNS
@@ -239,27 +242,6 @@ class Table:
 
         # ready the tail record with new values 
         values += columns
-
-        # this is redundant, keeping here for reference
-
-        # # this would be the first update to the record, so we need to 
-        # # (1) change the base's indirection pointer from None to our RID 
-        # # (2) set the new tail page's indirection to the base page's RID
-        # if indirection_pointer == None:
-        #     self.replace(baseRID, RID_COLUMN, values[RID_COLUMN])
-        #     values[INDIRECTION_COLUMN] = baseRID # (2)
-        # # if this isn't the first update, then
-        # # (1) set the new tail page's indirection to what was previously contained in the base page
-        # # (2) update the base page's indirection to point to the new tail page's RID
-        # else:
-        #     values[INDIRECTION_COLUMN] = indirection_pointer # (1)
-        #     self.replace(baseRID, RID_COLUMN, values[RID_COLUMN]) # (2)
-
-        # # inserting the actual newest tail record 
-        # # check each column. if it is the first update of that column, we need to insert a tail record that copies the original data
-        # # no matter what, we always have to insert the actual new tail record
-
-
         #---- adding actual update ----------------------------
         
         #new_indirection == current_base_indirection so it is repetitive to reread:
@@ -290,6 +272,9 @@ class Table:
             page_offsets[i] = page_range.tail_pages[last_tail_page][i].page_size # done so since page sizes might differ due to None values
             page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
 
+        # add to merge
+        self.merge_set.append(Record(values[RID_COLUMN], values[self.key], values))
+        
         # add the values to the index. for now just index the primary key, no secondary keys right now
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
 
@@ -300,7 +285,11 @@ class Table:
             # use the page offsets that were saved earlier 
             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
             page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
+
         #------------------------------------
+        # check if merge set is full, if so run merge
+        if (len(self.merge_set) >= self.merge_threshold_pages):
+            self.merge_queue.put(self.merge_set)
 
         return True
 
@@ -383,9 +372,10 @@ class Table:
         return RID
 
 
-    def __merge(self):
+    def merge(self):
         print("merge is happening")
         pass
+        
 
     """
     Searches through tail records and returns the contents of a given column that match
