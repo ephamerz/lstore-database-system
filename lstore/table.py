@@ -78,10 +78,7 @@ class Table:
         values[BASE_RID_COLUMN] = None
         values += columns
 
-        #for i in range(self.total_columns):
-            # check if the base page fully has room for each column. if any of them don't, we need to move on to the next base page
-        # -> for loop takes more time so redo it//redundant
-        #    only nned to check once rather than looping; change .has_capacity(i) to Entry Size = 8 since constant
+        
         base_pages = page_range.base_pages
         base_idx = page_range.basePageToWrite
         if not base_pages[base_idx][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
@@ -382,12 +379,60 @@ class Table:
         print("merge is starting")
         while (1):
             if self.merge_queue > 0:
-                batch_tail_page = self.merge_queue.get()
+                batch_tail_records = self.merge_queue.get()
 
-    def getBasePageCopy(self, tail_pages):
-        pass
+                batch_cons_page = self.getBasePageCopy(batch_tail_records)
+
+                for i in range(len(batch_cons_page)):
+                    self.decompress_page(batch_cons_page[i])
+                    
+
+                seenUpdates = set()
+
+                for tail_record in reversed(batch_tail_records):
+                     
+                     rid = tail_record.rid
+
+                     if rid not in seenUpdates:
+                         seenUpdates.add(rid)
+                         
+                         # find the base record we're trying to update
+                         base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
+                         
+
+                    
+
+
+    # @param [Record] tail_pages: list of tail records that aren't merged yet (THIS SHOULD BE LOOKED INTO AS L STORE PAPER ITSELF CONFLICTS ON TOPIC 4.1)
+    # @return base_page_copy: set of compressed (untranslated) base pages that need to be merged, no duplicates
+    def getBasePageCopy(self, tail_records):
+
+        # Create an empty set to fill 
+        base_page_copy = set()
+
+        # Go through each tail record given 
+        for tail_record in tail_records:
+
+            # Get the base RID that we want to from the tail reocrd
+            base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
+
+            # Add the base page to the set, using INDIRECTION for placeholder
+            location = self.page_directory.get((INDIRECTION_COLUMN, base_RID))
+
+            page_range_index = location[0]
+            page_index = location[1]
+            page_range = self.page_ranges[page_range_index]     
+
+            base_page_copy.add(page_range.base_pages[page_index])
         
+
+        return base_page_copy
         
+        def decompress_page(self):
+            pass
+
+        def compress_page(self):
+            pass
 
     """
     Searches through tail records and returns the contents of a given column that match
