@@ -383,17 +383,17 @@ class Table:
     def merge(self):
         print("merge is starting")
         while (1):
-            if self.merge_queue > 0:
+            if (self.merge_queue.qsize()) > 0:
                 batch_tail_records = self.merge_queue.get()
 
                 batch_cons_page = self.getBasePageCopy(batch_tail_records)
 
-                for i in range(len(batch_cons_page)):
-                    self.decompress_page(batch_cons_page[i])
+                # for i in range(len(batch_cons_page)):
+                #     self.decompress_page(batch_cons_page[i])
                     
 
                 seenUpdates = {}
-                base_RIDs_to_update = {} # make a set of the base RIDs that need to be updated for quick base page overwriting later
+                base_RIDs_to_update = set() # make a set of the base RIDs that need to be updated for quick base page overwriting later
 
                 # Find the newest updates
                 for tail_record in reversed(batch_tail_records):
@@ -437,7 +437,7 @@ class Table:
     def getBasePageCopy(self, tail_records):
 
         # Create an empty set to fill 
-        base_page_copy = set()
+        base_page_copy = []
 
         # Go through each tail record given 
         for tail_record in tail_records:
@@ -451,8 +451,9 @@ class Table:
             page_range_index = location[0]
             page_index = location[1]
             page_range = self.page_ranges[page_range_index]     
-
-            base_page_copy.add(page_range.base_pages[page_index])
+            
+            if page_range.base_pages[page_index] not in base_page_copy:
+                base_page_copy.append(page_range.base_pages[page_index])
         
 
         return base_page_copy
