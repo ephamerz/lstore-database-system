@@ -4,6 +4,8 @@ import struct
 import threading
 from queue import Queue 
 from lstore.page import Page, PageRange
+import pickle
+import os
 
 INDIRECTION_COLUMN = 0
 RID_COLUMN = 1
@@ -38,8 +40,10 @@ class Table:
     :param name: string         #Table name
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
+    :param bufferpool:          #lets table use bufferpool
+    :param disk_manager:        #lets table use disk_manager
     """
-    def __init__(self, name, num_columns, key):
+    def __init__(self, name, num_columns, key, bufferpool, disk_manager):
         self.name = name
         self.key = key
         self.num_columns = num_columns 
@@ -48,6 +52,8 @@ class Table:
         self.page_directory = {} # key: column, RID --> value: page_range, page, page_offset
         self.page_ranges = []
         self.index = Index(self)
+        self.bufferpool = bufferpool
+        self.disk_manager = disk_manager
         self.merge_threshold_pages = 50  # The threshold to trigger a merge
         self.merge_set = [] # holds tail records until 50 records, then add queue
         self.merge_queue = Queue() # used by merge thread
@@ -65,7 +71,87 @@ class Table:
         thread.start()
 
 
+    #helper funcs for integrating buffer and disk into table:
+
+    #tuple format used in bufferpool and disk manager so convert table info to it
+        #page_key: (table, page_range, is_tail, page_idx, col_idx)
+    #@page_range_index: which page range this page is part of
+    #@table_page_index: table's page slot; its tail has offset(tail_page_index = last_tail_page + MAX_BASE_PAGES)
+    #@column_index: which col pg in the pg slot
+    def _page_key(self, page_range_index, table_page_index, column_index):
+        #convert pg index into base or tail boolean
+        is_tail = table_page_index >= MAX_BASE_PAGES
         
+        #if tail then need do tail numbering rather than base numbering since theyre diff
+        if is_tail:
+            page_index = table_page_index - MAX_BASE_PAGES
+        else:
+            page_index = table_page_index
+        #return page_key
+        return (self.name, page_range_index, is_tail, page_index, column_index)
+
+
+    #uses parameters to find  where to access and gets the page object for that location
+    def _get_page(self, page_range_index, page_index, column_index):
+        #gets page_key from table in the tuple format w helper
+        page_key = self._page_key(page_range_index, page_index, column_index)
+        #return page and page_key since it will help simplify code for managing dirty and unpinning
+        return self.bufferpool.get_page(page_key), page_key
+
+
+    #read from page and unpin after done w read transaction
+    #param: page_offset is the page offset in the page where the cell value is//used in page_directory
+    def _read_page(self, page_range_index, page_index, column_index, page_offset):
+        #will do pinning through this route(w get_page) and get the page we are checking
+        page, page_key = self._get_page(page_range_index, page_index, column_index)
+        #w page from buffer, read the specific info wanted from it w page.read
+        value = page.read(page_offset)
+        #dont need page anymore so unpin
+        self.bufferpool.unpin(page_key)
+        #return the cell value from the page
+        return value
+
+
+    #write/append in a page and return the page_offset so the page_directory knows where to find it
+    def _write_page(self, page_range_index, page_index, column_index, value):
+        #will do pinning through this route(w get_page) and get the page we are checking
+        page, page_key = self._get_page(page_range_index, page_index, column_index)
+        #current size before the append to know where to access after
+        page_offset = page.page_size
+        #append page with the value at the end of the original page 
+        page.write(value)
+        
+        #since updated need to mark dirty now and then unpin:
+        self.bufferpool.mark_dirty(page_key)
+        self.bufferpool.unpin(page_key)
+        #for page_directory since it needs the start position of value in order to find it
+        return page_offset
+
+
+    #deals with updating a page for the update_record so it goes through buffer and does the needed pinning and marking dirty
+    def _update_page(self, page_range_index, page_index, column_index, value, page_offset):
+        #will do pinning through this route(w get_page) and get the page we are checking
+        page, page_key = self._get_page(page_range_index, page_index, column_index)
+        #go to page_offset in the targetted page and update the old value with this new one
+        page.replace(value, page_offset)
+
+        #once done with the update:
+        self.bufferpool.mark_dirty(page_key)
+        self.bufferpool.unpin(page_key)
+
+
+    #whening checking has_capacity it goes through page which is now supposed to be dealt w buffer 
+        # so adding this to make it know that a page is being accessed and pinning and unpinning accordingly
+    def _has_capacity(self, page_range_index, page_index, column_index, size):
+        #will do pinning through this route(w get_page) and get the page we are checking
+        page, page_key = self._get_page(page_range_index, page_index, column_index)
+        #returns a boolean that will be true if there is capacity and false if there isnt
+        capacity = page.has_capacity(size)
+        #done w checking
+        self.bufferpool.unpin(page_key)
+        return capacity
+
+  
     """
     # insert an entirely new record. this goes into a base page
     # columns: an array of the columns with values we want to insert. does not include the 4 metadata columns so we need to calculate those ourselves
@@ -87,10 +173,13 @@ class Table:
         values[BASE_RID_COLUMN] = None
         values += columns
 
-        
-        base_pages = page_range.base_pages
+        #add so that buffer can use this
+        page_range_index = len(page_ranges) - 1
+        #base_pages = page_range.base_pages // no longer needed bc of the helper
         base_idx = page_range.basePageToWrite
-        if not base_pages[base_idx][0].has_capacity(ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
+
+        #adjusted base_pages[base_idx][0].has_capacity(ENTRY_SIZE) to use the table to buffer helper
+        if not self._has_capacity(page_range_index,base_idx, 0, ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
             base_idx += 1 
             page_range.basePageToWrite = base_idx
        
@@ -98,17 +187,23 @@ class Table:
             if base_idx >= MAX_BASE_PAGES:
                 page_ranges.append(PageRange(total_columns))
                 page_range = page_ranges[-1]
-                base_pages = page_range.base_pages
+                #base_pages = page_range.base_pages // not needed
                 base_idx = page_range.basePageToWrite
+                #add so that pg_range_index is consistent w the changes in page_range so that page_directory and helper arent diff
+                page_range_index = len(page_ranges) -1 
 
         # ---- THIS NEEDS TO BE REVISITED as all milestones have all columns as 64 bit integers, no strings or anything
         # can safely write the entire base record into the base page of the selected page range
         
         page_offsets = [None] * total_columns # save the page offsets for each column for later
-        
+
         for i in range(total_columns):
-            page_offsets[i] = base_pages[base_idx][i].page_size
-            base_pages[base_idx][i].write(values[i])
+        #    page_offsets[i] = base_pages[base_idx][i].page_size
+        #    base_pages[base_idx][i].write(values[i])
+        #change so that it goes through helper to deal with the pinning and marking instead of using .write
+            page_offsets[i] = self._write_page(page_range_index, base_idx, i, values[i])
+
+
         # ----------------------------------------------------------------------
 
         # add the values to the index. for now just index the primary key
@@ -221,18 +316,22 @@ class Table:
             # insert this first update into the tail page
             
             last_tail_page = len(page_range.tail_pages) - 1
+            #add for table to buffer helper parameter
+            page_index = last_tail_page + MAX_BASE_PAGES
 
             # check for space; tail pages are aligned, so one column check is sufficient
-            if not page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
+            if not self._has_capacity(page_range_index, page_index, 0, 8): #page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
                 page_range.allocate_new_tail_page() 
                 # FIXED: tail_page should be tail_pages
                 last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
-            
+                #update page_index with the new last_tail_page
+                page_index = last_tail_page + MAX_BASE_PAGES
+
             # can safely write the entire tail record into the tail page of the selected page range
             page_offsets = [None] * total_columns # save the page offsets for each column for later
             for j in range(total_columns):
-                page_offsets[j] = page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
-                page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
+                page_offsets[j] = self._write_page(page_range_index, page_index, j, first_update[j]) #page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
+                #removed: page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
            
             # add the mapping to the page directory
             self.page_directory_lock.acquire()
@@ -241,7 +340,7 @@ class Table:
                         # the page is the first available tail page, so the last one 
                         # use the page offsets that were saved earlier 
                         # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-                page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[j])
+                page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, page_index, page_offsets[j]) #last_tail_page + MAX_BASE_PAGES
             self.page_directory_lock.release()
 
         # change base record's schema encoding value
@@ -278,18 +377,22 @@ class Table:
         self.page_directory_lock.release()
         page_range = page_ranges[page_range_index]
         last_tail_page = len(page_range.tail_pages) - 1
+        #for helper
+        page_index = last_tail_page + MAX_BASE_PAGES
         
         
-        # check if the last tail page fully has room for the record (aligned pages)
-        if not page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
+        # check if the last tail page fully has room for the record (aligned pages) //use has capacity helper for buffer use
+        if not self._has_capacity(page_range_index, page_index, 0, 8): #page_range.tail_pages[last_tail_page][0].has_capacity(8): # len(values[i]) is future proofing  -DH
             page_range.allocate_new_tail_page() 
             last_tail_page = len(page_range.tail_pages) - 1 # using new tail page
+            page_index = last_tail_page + MAX_BASE_PAGES #need to update this as well
 
         # can safely write the entire tail record into the tail page of the selected page range
         page_offsets = [None] * total_columns # save the page offsets for each column for later
         for i in range(total_columns):
-            page_offsets[i] = page_range.tail_pages[last_tail_page][i].page_size # done so since page sizes might differ due to None values
-            page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
+            #routed to helper instead
+            page_offsets[i] = self._write_page(page_range_index, page_index, i, values[i]) #page_range.tail_pages[last_tail_page][i].page_size # done so since page sizes might differ due to None values
+            #removed: page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
         
         # add the values to the index. for now just index the primary key, no secondary keys right now
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
@@ -301,7 +404,7 @@ class Table:
             # the page is the first available tail page, so the last one 
             # use the page offsets that were saved earlier 
             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-            page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
+            page_directory[(i, values[RID_COLUMN])] = (page_range_index, page_index, page_offsets[i]) #last_tail_page + MAX_BASE_PAGES
         self.page_directory_lock.release()
 
         #------------------------------------
@@ -349,15 +452,18 @@ class Table:
         page_index = location[1]
         page_offset = location[2]
         
-        page_range = self.page_ranges[page_range_index]
+       #page_range = self.page_ranges[page_range_index]
         # Check if this is a base page (page_index < MAX_BASE_PAGES) or tail page
-        if page_index < MAX_BASE_PAGES:
-            page_range.base_pages[page_index][column_for_replace].replace(value, page_offset)
-        else:
+        #if page_index < MAX_BASE_PAGES:
+        #    page_range.base_pages[page_index][column_for_replace].replace(value, page_offset)
+        #else:
             # For tail pages, need to adjust the index
-            tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
-            page_range.tail_pages[tail_page_index][column_for_replace].replace(value, page_offset)
+         #   tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
+        #    page_range.tail_pages[tail_page_index][column_for_replace].replace(value, page_offset)
         
+        #replace above with helper so buffer involved// base or tail done w page_key var is_tail 
+        self._update_page(page_range_index,page_index, column_for_replace, value, page_offset)
+
         
 
     # passes in column and RID desired, gets address of page range, base page, page offset, returns value 
@@ -379,12 +485,15 @@ class Table:
         page_offset = location[2]
         page_range = page_ranges[page_range_index]
         
-        if page_index < MAX_BASE_PAGES:
-            read_value = page_range.base_pages[page_index][column_to_read].read(page_offset)
-        else:
-            tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
-            read_value = page_range.tail_pages[tail_page_index][column_to_read].read(page_offset)
+        #if page_index < MAX_BASE_PAGES:
+        #    read_value = page_range.base_pages[page_index][column_to_read].read(page_offset)
+        #else:
+        #    tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
+        #    read_value = page_range.tail_pages[tail_page_index][column_to_read].read(page_offset)
         self.page_directory_lock.release()
+        #isntead of above commened out code, route w helper so buffer funcs included
+        read_value = self._read_page(page_range_index, page_index, column_to_read, page_offset)
+
         #if it isnt there just return now
         if read_value == None:
 
@@ -450,6 +559,7 @@ class Table:
                     new_base_page = new_base_page_info[0] # base page 
                     base_RID_to_update = new_base_page_info[1]
 
+
                     # TPS = -1 # TPS can never be -1
                     
                     # for i in range(self.num_columns):
@@ -484,12 +594,29 @@ class Table:
                     page_range = self.page_ranges[page_range_index] 
 
                     
-                    
-                    old_base_page = page_range.base_pages[page_index]
-                    self.deallocation_queue.put(old_base_page)
-                    page_range.base_pages[page_index] = new_base_page
+                    #swaps directly so changing it to use helper for buffer
+                    #old_base_page = page_range.base_pages[page_index]
+                    #self.deallocation_queue.put(old_base_page)
+                    #page_range.base_pages[page_index] = new_base_page
+
+                    #merges the col values to base going through buffer
+                    for i in range(METADATA_COLUMNS, self.total_columns): #skip the metadatacols
+                        #newest merged value for rid and in col
+                        newest_value = seenUpdates.get((base_RID_to_update, i))
+                        #if theres no update end it earlier
+                        if newest_value == None:
+                            continue
+                        #where to store newest_value in page_directory
+                        value_location = self.page_directory.get((i, base_RID_to_update))
+                        #get the location
+                        page_offset = value_location[2]
+                        #use the helper to involve buffer
+                        self._update_page(page_range_index, page_index,i, newest_value, page_offset)
+
+
                 self.page_directory_lock.release()     
             #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+
            
            
 
@@ -524,10 +651,21 @@ class Table:
             page_index = location[1]
             page_range = self.page_ranges[page_range_index]     
             
-            if (page_range.base_pages[page_index], base_RID) not in base_page_copy:
-                base_page_copy.append((page_range.base_pages[page_index], base_RID))
+            #if (page_range.base_pages[page_index], base_RID) not in base_page_copy:
+            #    base_page_copy.append((page_range.base_pages[page_index], base_RID))
                 #base_page_copy.add((page_range.base_pages[page_index], base_RID))
-        
+
+            #change it to have helper to use buffer
+            #just changing page_range.base_pages[page_index], base_RID to base_page and base_key
+            base_page, base_key = self._get_page(page_range_index, page_index, RID_COLUMN)
+            #done needing it pinned so unpin
+            self.bufferpool.unpin(base_key)
+            #changing base_RID to base_key crashed so dont do that
+            if (base_page, base_RID) not in base_page_copy:
+                base_page_copy.append((base_page, base_RID))
+
+
+
 
         return base_page_copy
         
@@ -548,6 +686,7 @@ class Table:
     # @return col_contents: int value at column that matches primary key
     def rabbit_hunt(self, col_idx, primary_key, version_num, base_rid = None):
         version_num *= 1
+
         physical_col_idx = col_idx + METADATA_COLUMNS
 
         # if not given base RID, find base record using primary_key index
@@ -620,10 +759,13 @@ class Table:
                 if base_schema[col_idx] == '0':
                     # never updated, so read from the base
                     result.append(read(physical_col_idx, rid))
+                    continue #edit
                 # if the schema says it was updated, but no tail chain, continue to read from base
-                elif indirection_rid is None or indirection_rid == 0:
+                if indirection_rid is None or indirection_rid == 0: #elif it if
                     # schema is updated but no tail exists, so read from base
                     result.append(read(physical_col_idx, rid))
+                    continue #edit
+                '''
                 else:
                     # check if the latest tail has the column
                     tail_schema = read(SCHEMA_ENCODING_COLUMN, indirection_rid)
@@ -633,8 +775,114 @@ class Table:
                     else:
                         # case where newest tail doesn't have the column, latest value stays from base record
                         result.append(read(physical_col_idx, rid))
+                '''
+                latest_value = None
+                current = indirection_rid
+
+                while current != None and current != 0 and current != rid:
+                    tail_schema = read(SCHEMA_ENCODING_COLUMN, current)
+                    if tail_schema == None:
+                        break
+                    if len(tail_schema) < self.num_columns:
+                        tail_schema = tail_schema + ('0' * (self.num_columns - len(tail_schema)))
+                    
+                    if tail_schema[col_idx] == '1':
+                        latest_value = read(physical_col_idx, current)
+                        break
+
+                    current = read(INDIRECTION_COLUMN, current)
+                
+                #if no tail then base still there
+                if latest_value == None:
+                    latest_value = read(physical_col_idx, rid)
+                
+                result.append(latest_value)
+                    
         else:
             # using rabbit_hunt with the base_rid
-            for col_idx in col_indices:
+            for col_idx in col_indices:                    
                 result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid))   # primary_key is unused when base_rid is given, 0 is placeholder
         return result
+
+    """
+    Saves table to disk.
+
+    :param path: string     #Path to save table to
+
+    NOTE: PICKLE IS ALLOWED FOR SAVING DATA OTHER THAN PAGES
+    """
+    def save(self, path):
+        os.makedirs(path, exist_ok=True)
+
+        # save table-level metadata
+        with open(os.path.join(path, 'table_metadata.bin'), 'wb') as f:
+            name_bytes = self.name.encode('utf-8') # name (str) needs space allocated
+            f.write(struct.pack('<q', len(name_bytes)))
+            f.write(name_bytes)
+
+            f.write(struct.pack('<q', self.num_columns))
+            f.write(struct.pack('<q', self.key))
+            f.write(struct.pack('<q', self.RID_counter))
+        
+        # save page directory w/ pickle (too complex for struct)
+        with open(os.path.join(path, 'page_directory.pkl'), 'wb') as f:
+            pickle.dump(self.page_directory, f)
+        
+        # save page ranges
+        for i, page_range in enumerate(self.page_ranges):
+            #page_range.save(os.path.join(path, f'page_range_{i}')) // this doesnt exist
+
+            #base pages
+            #need to get the base page inside the base index and col index so for loops for that    
+            #want number of base to read
+            for j in range(len(page_range.base_pages)):
+                for n in range(self.total_columns):
+                    page_key = (self.name, i, False, j, n)
+                    #writes directly to disk using the page_key
+                    self.disk_manager.write_page(page_key, page_range.base_pages[j][n])
+            
+            #tail pages
+            #want number of tail to read
+            for j in range(len(page_range.tail_pages)):
+                for n in range(self.total_columns):
+                    page_key = (self.name, i, True, j, n)
+                    self.disk_manager.write_page(page_key, page_range.tail_pages[j][n])
+
+
+
+    """
+    Load table from disk.
+
+    :param path: string     #Path to load table from
+    """
+    def load(self, path):
+        # load table-level metadata
+        with open(os.path.join(path, 'table_metadata.bin'), 'rb') as f:
+            name_length = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            self.name = f.read(name_length).decode('utf-8')
+
+            self.num_columns = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            self.key = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            self.RID_counter = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+        
+        # reconstruct num_columns-dependant variables
+        self.total_columns = self.num_columns + METADATA_COLUMNS
+        self.empty_schema = '0' * self.num_columns
+
+        # load page directory
+        with open(os.path.join(path, 'page_directory.pkl'), 'rb') as f:
+            self.page_directory = pickle.load(f)
+        
+        # load page ranges
+        '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
+        self.page_ranges = []
+        i = 0
+        while os.path.exists(os.path.join(path, f'page_range_{i}')):
+            page_range = PageRange(self.total_columns)
+            page_range.load(os.path.join(path, f'page_range_{i}'))
+            self.page_ranges.append(page_range)
+            i += 1
+        
+        # reconstruct index
+        self.index = Index(self)
+        

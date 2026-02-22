@@ -102,6 +102,12 @@ class Query:
         
         rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+
+        #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
+        vals = self.table.get_values_by_rid(rid, cols, 0)
+
+
+        '''
         base_schema = read(3, rid)
         indirection_rid = read(0, rid)
         tail_schema = None
@@ -118,7 +124,7 @@ class Query:
                     vals.append(read(physical_col_idx, indirection_rid))
                 else:
                     vals.append(read(physical_col_idx, rid))
-
+        '''
         return [Record(rid, search_key, vals)]
 
 
@@ -131,6 +137,7 @@ class Query:
             # get specified column data we want
         rids = self.table.index.locate(search_key_index, search_key)
         
+    
         #not needed since select will never call key that DNE
         #if len(rids) == 0:
         #    return False
@@ -139,7 +146,10 @@ class Query:
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
         vals = self.table.get_values_by_rid(rid, cols, relative_version)  
 
+
         return [Record(rid, search_key, vals)]
+
+
 
 #############
 
@@ -199,8 +209,30 @@ class Query:
             # if no records, fails
             if len(rids) == 0:
                 return False
+                
             # initializing running total count for aggregation
             total = 0
+
+            #edit to call get_values_by_rid rather than processing all here to not fix the tail issues multiple places
+            #this will get the newest value in the col for every record and add it to the total
+            for i in rids:
+                #get the latest value for rid
+                values = self.table.get_values_by_rid(i, [aggregate_column_index], 0)
+                #if theres nothing there break out since its useless
+                '''
+                if len(values) == 0:
+                    continue
+                '''
+                #edited here
+                if not isinstance(values, list) or len(values) == 0:
+                    continue
+                #just want the aggregate_col value
+                target_value = values[0]
+
+                # only add the value to the total if value is actually obtained//prevent a type error if there is a None value
+                if target_value != None:
+                    total += target_value
+            '''
             physical_col_idx = aggregate_column_index + METADATA_COLUMNS # skipping first 4 metadata columns for column index
 
             # processing each RID directly
@@ -230,7 +262,7 @@ class Query:
                 # only add the value to the total if we successfully retrieve a value
                 if value is not None:
                     total += value
-
+            '''
             return total
         except:
             return False

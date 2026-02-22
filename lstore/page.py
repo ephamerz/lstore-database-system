@@ -1,5 +1,6 @@
 # from lstore.table import Record
 import struct
+import os
 
 CAPACITY = 4096
 MANDATORY_COLUMNS = 5
