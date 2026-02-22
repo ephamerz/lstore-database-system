@@ -67,6 +67,28 @@ class Page:
         
         self.data[index:index+ENTRY_SIZE] = value_bytes
 
+    """
+    Saves page to disk.
+
+    param path: string     #Path to save page to
+    """
+    def save(self, path):
+        with open(path, 'wb') as f:
+            f.write(struct.pack('<q', self.num_records))
+            f.write(struct.pack('<q', self.page_size))
+            f.write(self.data)
+            #I never write page_number anywhere, but it's never used. - NB
+
+    """
+    Loads page from disk.
+    
+    param path: string     #Path to load page from
+    """
+    def load(self, path):
+        with open(path, 'rb') as f:
+            self.num_records = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            self.page_size = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            self.data = bytearray(f.read(CAPACITY))
         
 class PageRange:
 
@@ -96,3 +118,64 @@ class PageRange:
 
     def updateTPS(self, new_TPS_value, base_page_index):
         self.tps[base_page_index] = new_TPS_value
+
+
+    """
+    Saves page range to disk.
+
+    param path: string     #Path to save page range to
+    """
+    def save(self, path):
+        os.makedirs(path, exist_ok=True) # create path if it doesn't exist
+
+        # save base pages with naming convention base_page_{base_page_index}_col_{column_index}.bin
+        for base_page_index, base_page in enumerate(self.base_pages):
+            for column_index, page in enumerate(base_page):
+                page_path = os.path.join(path, f'base_page_{base_page_index}_col_{column_index}.bin')
+                page.save(page_path)
+
+        # save tail pages with similar naming convention 
+        for tail_page_index, tail_page in enumerate(self.tail_pages):
+            for column_index, page in enumerate(tail_page):
+                page_path = os.path.join(path, f'tail_page_{tail_page_index}_col_{column_index}.bin')
+                page.save(page_path)
+
+        # remaining metadata of base/tail pages
+        # num_columns is saved within Page.write()
+        with open(os.path.join(path, 'metadata.bin'), 'wb') as f:
+            f.write(struct.pack('<q', self.basePageToWrite))
+            f.write(struct.pack('<q', len(self.tail_pages)))
+    
+    """
+    Loads page range from disk.
+
+    param path: string     #Path to load page range from
+    """
+    def load(self, path):
+        # load metadata
+        with open(os.path.join(path, 'metadata.bin'), 'rb') as f:
+            self.basePageToWrite = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            num_tail_pages = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+
+        # load base pages
+        self.base_pages = [] # reset base pages before loading
+        for base_page_index in range(MAX_BASE_PAGES):
+            new_base_page = []
+            for column_index in range(self.num_columns):
+                page_path = os.path.join(path, f'base_page_{base_page_index}_col_{column_index}.bin')
+                page = Page()
+                page.load(page_path)
+                new_base_page.append(page)
+            self.base_pages.append(new_base_page)
+
+        # load tail pages
+        self.tail_pages = [] # reset tail pages before loading
+        for tail_page_index in range(num_tail_pages):
+            new_tail_page = []
+            for column_index in range(self.num_columns):
+                page_path = os.path.join(path, f'tail_page_{tail_page_index}_col_{column_index}.bin')
+                page = Page()
+                page.load(page_path)
+                new_tail_page.append(page)
+            self.tail_pages.append(new_tail_page)
+            
