@@ -1,6 +1,7 @@
 from lstore.index import Index
 import time
 import struct
+import threading
 from queue import Queue 
 from lstore.page import Page, PageRange
 
@@ -54,6 +55,11 @@ class Table:
 
         self.RID_counter = 0 # counter for assigning RIDs
         self.page_ranges.append(PageRange(self.total_columns)) # create initial page range
+
+        # Create background thread for merge
+        thread = threading.Thread(target=self.merge)
+        thread.daemon = False # want to wait for finish 
+        thread.start()
 
 
         
@@ -375,7 +381,6 @@ class Table:
 
 
     def merge(self):
-        pass
         print("merge is starting")
         while (1):
             if self.merge_queue > 0:
