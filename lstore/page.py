@@ -139,7 +139,7 @@ class PageRange:
 
         # remaining metadata of base/tail pages
         # num_columns is saved within Page.write()
-        with open(os.path.join(path, 'metadata.bin'), 'wb') as f:
+        with open(os.path.join(path, 'table_metadata.bin'), 'wb') as f:
             f.write(struct.pack('<q', self.basePageToWrite))
             f.write(struct.pack('<q', len(self.tail_pages)))
     
@@ -148,9 +148,9 @@ class PageRange:
 
     param path: string     #Path to load page range from
     """
-    def load(self, path):
+    def load(self, path, table):
         # load metadata
-        with open(os.path.join(path, 'metadata.bin'), 'rb') as f:
+        with open(os.path.join(path, '..\\table_metadata.bin'), 'rb') as f:
             self.basePageToWrite = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             num_tail_pages = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
 
@@ -158,11 +158,18 @@ class PageRange:
         self.base_pages = [] # reset base pages before loading
         for base_page_index in range(MAX_BASE_PAGES):
             new_base_page = []
+
             for column_index in range(self.num_columns):
-                page_path = os.path.join(path, f'base_page_{base_page_index}_col_{column_index}.bin')
+                page_path = os.path.join(path, f'base_p{base_page_index}_c{column_index}.bin')
                 page = Page()
                 page.load(page_path)
                 new_base_page.append(page)
+
+                read_offset = 0
+                while(read_offset < page.page_size):
+                    if column_index >= METADATA_COLUMNS:
+                        table.index.insert_record(new_base_page[1].read(read_offset),page.read(read_offset), column_index - METADATA_COLUMNS) #params: RID, value, column
+                        read_offset += 8
             self.base_pages.append(new_base_page)
 
         # load tail pages
@@ -170,7 +177,7 @@ class PageRange:
         for tail_page_index in range(num_tail_pages):
             new_tail_page = []
             for column_index in range(self.num_columns):
-                page_path = os.path.join(path, f'tail_page_{tail_page_index}_col_{column_index}.bin')
+                page_path = os.path.join(path, f'tail_p{tail_page_index}_c{column_index}.bin')
                 page = Page()
                 page.load(page_path)
                 new_tail_page.append(page)
