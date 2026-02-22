@@ -411,7 +411,9 @@ class Table:
             if (self.merge_queue.qsize()) > 0:
                 # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
+                self.merge_set_lock.acquire()
                 self.merge_set = []
+                self.merge_set_lock.acquire()
                 batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
 
                 # for i in range(len(batch_cons_page)):
@@ -461,9 +463,9 @@ class Table:
                             page_offset = location[2]
                             new_base_page[i].replace(col_value, page_offset)  
                     # swap the page locations. NEEDS TO BE LOCKED
-                while len(batch_cons_page) > 0:
+                for base_page in batch_cons_page:
 
-                    new_base_page_info = batch_cons_page.pop()
+                    new_base_page_info = base_page
                     new_base_page = new_base_page_info[0] # base page 
                     base_RID_to_update = new_base_page_info[1]
 
