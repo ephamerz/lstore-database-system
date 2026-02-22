@@ -822,24 +822,7 @@ class Table:
         
         # save page ranges
         for i, page_range in enumerate(self.page_ranges):
-            #page_range.save(os.path.join(path, f'page_range_{i}')) // this doesnt exist
-
-            #base pages
-            #need to get the base page inside the base index and col index so for loops for that    
-            #want number of base to read
-            for j in range(len(page_range.base_pages)):
-                for n in range(self.total_columns):
-                    page_key = (self.name, i, False, j, n)
-                    #writes directly to disk using the page_key
-                    self.disk_manager.write_page(page_key, page_range.base_pages[j][n])
-            
-            #tail pages
-            #want number of tail to read
-            for j in range(len(page_range.tail_pages)):
-                for n in range(self.total_columns):
-                    page_key = (self.name, i, True, j, n)
-                    self.disk_manager.write_page(page_key, page_range.tail_pages[j][n])
-
+            page_range.save(os.path.join(path, f'page_range_{i}'))
 
 
     """
