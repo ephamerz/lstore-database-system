@@ -4,18 +4,9 @@ import struct
 import threading
 from queue import Queue 
 from lstore.page import Page, PageRange
+from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, BASE_RID_COLUMN, MAX_BASE_PAGES, METADATA_COLUMNS, ENTRY_SIZE
 import pickle
 import os
-
-INDIRECTION_COLUMN = 0
-RID_COLUMN = 1
-TIMESTAMP_COLUMN = 2
-SCHEMA_ENCODING_COLUMN = 3
-BASE_RID_COLUMN = 4
-
-MAX_BASE_PAGES = 16
-METADATA_COLUMNS = 5 # indirection, rid, time, schema, baserid
-ENTRY_SIZE = 8 # 8 bytes
 
 class Record:
 
@@ -211,7 +202,8 @@ class Table:
         #    self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
         # -> for loop will take  O(n) time so longer needed, 
         #    since we just want to index primary key dont need the whole for loop so O(1) time
-        self.index.insert_record(values[RID_COLUMN], values[self.key + METADATA_COLUMNS], self.key)
+        for i in range(self.num_columns):
+            self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
 
         # add the mapping to the page directory
         page_range_index = len(page_ranges)-1
@@ -830,8 +822,7 @@ class Table:
         
         # save page ranges
         for i, page_range in enumerate(self.page_ranges):
-            range_path = os.path.join(path, f'page_range_{i}')
-            page_range.save(range_path)
+            page_range.save(os.path.join(path, f'page_range_{i}'))
 
     """
     Load table from disk.
@@ -859,11 +850,15 @@ class Table:
         # reconstruct index
         self.index = Index(self) # assuming i can move it here MUST BE B4 PAGE_RANGE.load()
         
+        # reconstruct index, create index for each column
+        self.index = Index(self)
+
         # load page ranges
         '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
         self.page_ranges = []
         i = 0
-        while os.path.exists(os.path.join(path, f'page_range_{i}')):
+        print(os.path.join(path, f'pr_{i}'))
+        while os.path.exists(os.path.join(path, f'pr_{i}')):
             page_range = PageRange(self.total_columns)
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
             self.page_ranges.append(page_range)

@@ -1,5 +1,6 @@
 import os
-from lstore.page import Page, CAPACITY
+from lstore.page import Page
+from lstore.config import CAPACITY
 
 """
 DiskManager is needed to read and write pages to the disk. Each page is uniquely

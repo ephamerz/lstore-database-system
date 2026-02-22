@@ -1,8 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 
-LATEST_VERSION = 0
-METADATA_COLUMNS = 5
+
 
 class Query:
     """

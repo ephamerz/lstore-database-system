@@ -1,11 +1,8 @@
 # from lstore.table import Record
 import struct
 import os
+from lstore.config import CAPACITY, METADATA_COLUMNS, MAX_BASE_PAGES, ENTRY_SIZE
 
-CAPACITY = 4096
-MANDATORY_COLUMNS = 5
-MAX_BASE_PAGES = 16
-ENTRY_SIZE = 8 # 8 bytes
 
 class Page:
 
@@ -142,7 +139,7 @@ class PageRange:
 
         # remaining metadata of base/tail pages
         # num_columns is saved within Page.write()
-        with open(os.path.join(path, 'metadata.bin'), 'wb') as f:
+        with open(os.path.join(path, 'page_range_metadata.bin'), 'wb') as f:
             f.write(struct.pack('<q', self.basePageToWrite))
             f.write(struct.pack('<q', len(self.tail_pages)))
     
@@ -153,7 +150,7 @@ class PageRange:
     """
     def load(self, path, table):
         # load metadata
-        with open(os.path.join(path, 'metadata.bin'), 'rb') as f:
+        with open(os.path.join(path, 'page_range_metadata.bin'), 'rb') as f:
             self.basePageToWrite = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             num_tail_pages = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
 
@@ -161,6 +158,7 @@ class PageRange:
         self.base_pages = [] # reset base pages before loading
         for base_page_index in range(MAX_BASE_PAGES):
             new_base_page = []
+
             for column_index in range(self.num_columns):
                 page_path = os.path.join(path, f'base_page_{base_page_index}_col_{column_index}.bin')
                 page = Page()
