@@ -60,7 +60,7 @@ class Table:
 
         # Create background thread for merge
         thread = threading.Thread(target=self.merge)
-        thread.daemon = False # want to wait for finish 
+        thread.daemon = True # want to wait for finish 
         thread.start()
 
 
@@ -297,7 +297,6 @@ class Table:
             page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
 
         #------------------------------------
-        # check if merge set is full, if so run merge
         if (len(self.merge_set) >= self.merge_threshold_pages):
             self.merge_queue.put(self.merge_set)
 
@@ -383,12 +382,17 @@ class Table:
 
 
     def merge(self):
-        print("merge is starting")
+        
+        
+        print("thread is starting")
         while (1):
+            # print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             if (self.merge_queue.qsize()) > 0:
+                # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
+                self.merge_set = []
 
-                batch_cons_page = self.getBasePageCopy(batch_tail_records)
+                batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
 
                 # for i in range(len(batch_cons_page)):
                 #     self.decompress_page(batch_cons_page[i])
@@ -419,9 +423,17 @@ class Table:
                 # overwrite the base pages
                 # not sure if this is the most efficient way tbh
                 while len(batch_cons_page) > 0:
+
+
+
                     new_base_page_info = batch_cons_page.pop()
-                    new_base_page = new_base_page_info[0]
+                    new_base_page = new_base_page_info[0] # base page 
                     base_RID_to_update = new_base_page_info[1]
+
+
+
+
+                    
                     for i in range(self.num_columns):
                         col_value = seenUpdates.get((base_RID_to_update, i))
                         # if it's None we don't need to do anything
@@ -438,11 +450,14 @@ class Table:
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
                     page_range.base_pages[page_index] = new_base_page
-                    self.page_directory_lock.release()                    
+                    self.page_directory_lock.release()     
+            # print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+           
+           
 
 
     # @param [Record] tail_pages: list of tail records that aren't merged yet (THIS SHOULD BE LOOKED INTO AS L STORE PAPER ITSELF CONFLICTS ON TOPIC 4.1)
-    # @return base_page_copy: set of compressed (untranslated) base pages that need to be merged, no duplicates
+    # @return base_page_copy: 2d ARRAY of compressed (untranslated) base pages that need to be merged, no duplicates
     def getBasePageCopy(self, tail_records):
 
         # Create an empty set to fill 
@@ -463,13 +478,13 @@ class Table:
         
         # page_range = self.page_ranges[page_range_index]
 
-            location = self.page_directory.get((INDIRECTION_COLUMN, base_RID))
+            location = self.page_directory.get((RID_COLUMN, base_RID))
 
             page_range_index = location[0]
             page_index = location[1]
             page_range = self.page_ranges[page_range_index]     
             
-            if page_range.base_pages[page_index] not in base_page_copy:
+            if (page_range.base_pages[page_index], base_RID) not in base_page_copy:
                 base_page_copy.append((page_range.base_pages[page_index], base_RID))
                 #base_page_copy.add((page_range.base_pages[page_index], base_RID))
         
