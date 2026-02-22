@@ -357,16 +357,18 @@ class Table:
             # For tail pages, need to adjust the index
             tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
             page_range.tail_pages[tail_page_index][column_for_replace].replace(value, page_offset)
+        
+        
 
     # passes in column and RID desired, gets address of page range, base page, page offset, returns value 
     def read(self, column_to_read, RID):
         #save time calling these
         self.page_directory_lock.acquire()
-        self.page_directory_lock.acquire()
+
         page_directory = self.page_directory
         page_ranges = self.page_ranges
         location = page_directory.get((column_to_read, RID))
-        self.page_directory_lock.release()
+
         
         if location == None:
             self.page_directory_lock.release()
@@ -405,7 +407,7 @@ class Table:
         
         print("thread is starting")
         while (1):
-            print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
+            #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             if (self.merge_queue.qsize()) > 0:
                 # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
@@ -474,8 +476,8 @@ class Table:
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
                     page_range.base_pages[page_index] = new_base_page
-                    self.page_directory_lock.release()     
-            print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+                self.page_directory_lock.release()     
+            #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
            
            
 
