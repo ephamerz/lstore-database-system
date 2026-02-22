@@ -385,13 +385,13 @@ class Table:
     def merge(self):
         print("merge is starting")
         while (1):
-            if self.merge_queue > 0:
+            if (self.merge_queue.qsize()) > 0:
                 batch_tail_records = self.merge_queue.get()
 
                 batch_cons_page = self.getBasePageCopy(batch_tail_records)
 
-                for i in range(len(batch_cons_page)):
-                    self.decompress_page(batch_cons_page[i])
+                # for i in range(len(batch_cons_page)):
+                #     self.decompress_page(batch_cons_page[i])
                     
 
                 seenUpdates = {}
@@ -428,7 +428,7 @@ class Table:
                         if col_value != None:
                             location = self.page_directory.get((i, base_RID_to_update))
                             page_offset = location[2]
-                            new_base_page.replace(col_value, page_offset)  
+                            new_base_page[i].replace(col_value, page_offset)  
                     # swap the page locations. NEEDS TO BE LOCKED
                     page_range_index = location[0]
                     page_index = location[1]
@@ -446,7 +446,7 @@ class Table:
     def getBasePageCopy(self, tail_records):
 
         # Create an empty set to fill 
-        base_page_copy = set()
+        base_page_copy = []
 
         # Go through each tail record given 
         for tail_record in tail_records:
@@ -455,13 +455,23 @@ class Table:
             base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
 
             # Add the base page to the set, using INDIRECTION for placeholder
+
+        #     location = self.page_directory.get((column_for_replace, RID))
+        # page_range_index = location[0]
+        # page_index = location[1]
+        # page_offset = location[2]
+        
+        # page_range = self.page_ranges[page_range_index]
+
             location = self.page_directory.get((INDIRECTION_COLUMN, base_RID))
 
             page_range_index = location[0]
             page_index = location[1]
             page_range = self.page_ranges[page_range_index]     
-
-            base_page_copy.add((page_range.base_pages[page_index], base_RID))
+            
+            if page_range.base_pages[page_index] not in base_page_copy:
+                base_page_copy.append((page_range.base_pages[page_index], base_RID))
+                #base_page_copy.add((page_range.base_pages[page_index], base_RID))
         
 
         return base_page_copy
