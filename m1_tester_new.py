@@ -35,8 +35,8 @@ for i in range(0, number_of_records):
 print("Insert finished")
 
 # Check inserted records using select query
-for key in records:
-    print('select on', key, ':', records[key])
+# for key in records:
+#     print('select on', key, ':', records[key])
 
 # Check inserted records using select query
 for key in records:

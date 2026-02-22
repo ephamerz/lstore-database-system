@@ -395,7 +395,6 @@ class Table:
                     
 
                 seenUpdates = {}
-                base_RIDs_to_update = set() # make a set of the base RIDs that need to be updated for quick base page overwriting later
 
                 # Find the newest updates
                 for tail_record in reversed(batch_tail_records):
@@ -410,7 +409,6 @@ class Table:
 
                     # Make sure that we get the latest values
                     base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
-                    base_RIDs_to_update.add(base_RID)
 
                     for i in range(len(columns_to_update)):
                         
@@ -420,14 +418,17 @@ class Table:
                 
                 # overwrite the base pages
                 # not sure if this is the most efficient way tbh
-                for base_RID_to_update in base_RIDs_to_update:
+                while len(batch_cons_page) > 0:
+                    new_base_page_info = batch_cons_page.pop()
+                    new_base_page = new_base_page_info[0]
+                    base_RID_to_update = new_base_page_info[1]
                     for i in range(self.num_columns):
                         col_value = seenUpdates.get((base_RID_to_update, i))
                         # if it's None we don't need to do anything
                         if col_value != None:
                             location = self.page_directory.get((i, base_RID_to_update))
                             page_offset = location[2]
-                            batch_cons_page.replace(col_value, page_offset)  
+                            new_base_page.replace(col_value, page_offset)  
                     # swap the page locations. NEEDS TO BE LOCKED
                     page_range_index = location[0]
                     page_index = location[1]
@@ -436,7 +437,7 @@ class Table:
                     self.page_directory_lock.acquire()
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
-                    page_range.base_pages[page_index] = batch_cons_page
+                    page_range.base_pages[page_index] = new_base_page
                     self.page_directory_lock.release()                    
 
 
@@ -460,7 +461,7 @@ class Table:
             page_index = location[1]
             page_range = self.page_ranges[page_range_index]     
 
-            base_page_copy.add(page_range.base_pages[page_index])
+            base_page_copy.add((page_range.base_pages[page_index], base_RID))
         
 
         return base_page_copy
