@@ -848,17 +848,14 @@ class Table:
             self.page_directory = pickle.load(f)
 
         # reconstruct index
-        self.index = Index(self) # assuming i can move it here MUST BE B4 PAGE_RANGE.load()
-        
-        # reconstruct index, create index for each column
         self.index = Index(self)
 
         # load page ranges
         '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
         self.page_ranges = []
         i = 0
-        print(os.path.join(path, f'pr_{i}'))
-        while os.path.exists(os.path.join(path, f'pr_{i}')):
+        print(os.path.join(path, f'page_range_{i}'))
+        while os.path.exists(os.path.join(path, f'page_range_{i}')):
             page_range = PageRange(self.total_columns)
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
             self.page_ranges.append(page_range)
