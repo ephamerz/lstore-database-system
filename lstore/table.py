@@ -388,6 +388,7 @@ class Table:
                     
 
                 seenUpdates = {}
+                base_RIDs_to_update = {} # make a set of the base RIDs that need to be updated for quick base page overwriting later
 
                 # Find the newest updates
                 for tail_record in reversed(batch_tail_records):
@@ -402,19 +403,27 @@ class Table:
 
                     # Make sure that we get the latest values
                     base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
+                    base_RIDs_to_update.add(base_RID)
+
                     for i in range(len(columns_to_update)):
                         
                         if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
                             write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
                             seenUpdates.update({(base_RID, i) : write_val})
-                    
-
-                    
+                
+                # overwrite the base pages
+                # not sure if this is the most efficient way tbh
+                for base_RID_to_update in base_RIDs_to_update:
+                    for i in range(self.num_columns):
+                        col_value = seenUpdates.get((base_RID_to_update, i))
+                        # if it's None we don't need to do anything
+                        if col_value != None:
+                            location = self.page_directory.get((i, base_RID_to_update))
+                            page_offset = location[2]
+                            batch_cons_page.replace(col_value, page_offset)                         
                             
-                            
-                            
-
-
+                # swap the page directory locations. NEEDS TO BE LOCKED
+                
                     
 
 
