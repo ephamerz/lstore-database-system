@@ -816,39 +816,22 @@ class Table:
 
         # save table-level metadata
         with open(os.path.join(path, 'table_metadata.bin'), 'wb') as f:
-            name_bytes = self.name.encode('utf-8') # name (str) needs space allocated
+            name_bytes = self.name.encode('utf-8')
             f.write(struct.pack('<q', len(name_bytes)))
             f.write(name_bytes)
-
+            
             f.write(struct.pack('<q', self.num_columns))
             f.write(struct.pack('<q', self.key))
             f.write(struct.pack('<q', self.RID_counter))
         
-        # save page directory w/ pickle (too complex for struct)
+        # save page directory
         with open(os.path.join(path, 'page_directory.pkl'), 'wb') as f:
             pickle.dump(self.page_directory, f)
         
         # save page ranges
         for i, page_range in enumerate(self.page_ranges):
-            #page_range.save(os.path.join(path, f'page_range_{i}')) // this doesnt exist
-
-            #base pages
-            #need to get the base page inside the base index and col index so for loops for that    
-            #want number of base to read
-            for j in range(len(page_range.base_pages)):
-                for n in range(self.total_columns):
-                    page_key = (self.name, i, False, j, n)
-                    #writes directly to disk using the page_key
-                    self.disk_manager.write_page(page_key, page_range.base_pages[j][n])
-            
-            #tail pages
-            #want number of tail to read
-            for j in range(len(page_range.tail_pages)):
-                for n in range(self.total_columns):
-                    page_key = (self.name, i, True, j, n)
-                    self.disk_manager.write_page(page_key, page_range.tail_pages[j][n])
-
-
+            range_path = os.path.join(path, f'page_range_{i}')
+            page_range.save(range_path)
 
     """
     Load table from disk.
@@ -872,6 +855,9 @@ class Table:
         # load page directory
         with open(os.path.join(path, 'page_directory.pkl'), 'rb') as f:
             self.page_directory = pickle.load(f)
+
+        # reconstruct index
+        self.index = Index(self) # assuming i can move it here MUST BE B4 PAGE_RANGE.load()
         
         # load page ranges
         '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
@@ -879,10 +865,9 @@ class Table:
         i = 0
         while os.path.exists(os.path.join(path, f'page_range_{i}')):
             page_range = PageRange(self.total_columns)
-            page_range.load(os.path.join(path, f'page_range_{i}'))
+            page_range.load(os.path.join(path, f'page_range_{i}'), self)
             self.page_ranges.append(page_range)
             i += 1
-        
-        # reconstruct index
-        self.index = Index(self)
+
+            
         

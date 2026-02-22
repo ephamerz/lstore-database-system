@@ -89,7 +89,7 @@ class Page:
             self.num_records = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.page_size = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.data = bytearray(f.read(CAPACITY))
-        
+
 class PageRange:
 
     def __init__(self, num_columns): # initialize 16 base pages indexed at 0
@@ -151,7 +151,7 @@ class PageRange:
 
     param path: string     #Path to load page range from
     """
-    def load(self, path):
+    def load(self, path, table):
         # load metadata
         with open(os.path.join(path, 'metadata.bin'), 'rb') as f:
             self.basePageToWrite = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
@@ -166,6 +166,15 @@ class PageRange:
                 page = Page()
                 page.load(page_path)
                 new_base_page.append(page)
+
+            # populate Index(obj) for each record
+            size = new_base_page[0].size
+            for i in range(size, step = ENTRY_SIZE):
+                for column_index in range(table.METADATA_COLUMNS, self.num_columns):
+                    rid = new_base_page[table.RID_COLUMN].read(i)
+                    value = new_base_page[column_index].read(i)
+                    table.index.insert_record(rid, value, (column_index - table.METADATA_COLUMNS))     
+
             self.base_pages.append(new_base_page)
 
         # load tail pages
