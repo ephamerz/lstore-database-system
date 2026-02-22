@@ -2,6 +2,7 @@ from lstore.table import Table, Record
 from lstore.index import Index
 
 LATEST_VERSION = 0
+METADATA_COLUMNS = 5
 
 class Query:
     """
@@ -109,7 +110,7 @@ class Query:
 
         vals = []
         for col_idx in cols:
-            physical_col_idx = col_idx + 4
+            physical_col_idx = col_idx + METADATA_COLUMNS
             if base_schema[col_idx] == '0' or indirection_rid is None or indirection_rid == 0:
                 vals.append(read(physical_col_idx, rid))
             else:
@@ -200,7 +201,7 @@ class Query:
                 return False
             # initializing running total count for aggregation
             total = 0
-            physical_col_idx = aggregate_column_index + 4 # skipping first 4 metadata columns for column index
+            physical_col_idx = aggregate_column_index + METADATA_COLUMNS # skipping first 4 metadata columns for column index
 
             # processing each RID directly
             for rid in rids:
