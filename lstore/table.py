@@ -56,6 +56,8 @@ class Table:
         self.RID_counter = 0 # counter for assigning RIDs
         self.page_ranges.append(PageRange(self.total_columns)) # create initial page range
 
+        self.page_directory_lock = threading.Lock()
+
         # Create background thread for merge
         thread = threading.Thread(target=self.merge)
         thread.daemon = False # want to wait for finish 
@@ -425,11 +427,17 @@ class Table:
                         if col_value != None:
                             location = self.page_directory.get((i, base_RID_to_update))
                             page_offset = location[2]
-                            batch_cons_page.replace(col_value, page_offset)                         
-                            
-                # swap the page directory locations. NEEDS TO BE LOCKED
-                
-                    
+                            batch_cons_page.replace(col_value, page_offset)  
+                    # swap the page locations. NEEDS TO BE LOCKED
+                    page_range_index = location[0]
+                    page_index = location[1]
+                    page_range = self.page_ranges[page_range_index] 
+
+                    self.page_directory_lock.acquire()
+                    old_base_page = page_range.base_pages[page_index]
+                    self.deallocation_queue.put(old_base_page)
+                    page_range.base_pages[page_index] = batch_cons_page
+                    self.page_directory_lock.release()                    
 
 
     # @param [Record] tail_pages: list of tail records that aren't merged yet (THIS SHOULD BE LOOKED INTO AS L STORE PAPER ITSELF CONFLICTS ON TOPIC 4.1)

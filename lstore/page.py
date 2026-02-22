@@ -74,7 +74,7 @@ class PageRange:
         self.basePageToWrite = 0 # a variable that keeps count of the current base page we should write to, I feel like this implementation might need to be revisited when deletion comes along - DH
 
         self.base_pages = []
-        self.tps = [0] * 10 # one tps value for every base page
+        self.tps = [0] * MAX_BASE_PAGES # one tps value for every base page
         for base_page in range(MAX_BASE_PAGES): # make 16 base pages
             self.base_pages.append([])
             for page in range(0, (self.num_columns)): 
