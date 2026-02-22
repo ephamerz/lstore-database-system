@@ -1,7 +1,7 @@
 # from lstore.table import Record
 import struct
 import os
-from config import CAPACITY, METADATA_COLUMNS, MAX_BASE_PAGES, ENTRY_SIZE
+from lstore.config import CAPACITY, METADATA_COLUMNS, MAX_BASE_PAGES, ENTRY_SIZE
 
 
 class Page:

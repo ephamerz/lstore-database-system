@@ -4,7 +4,7 @@ import struct
 import threading
 from queue import Queue 
 from lstore.page import Page, PageRange
-from config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, BASE_RID_COLUMN, MAX_BASE_PAGES, METADATA_COLUMNS, ENTRY_SIZE
+from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, BASE_RID_COLUMN, MAX_BASE_PAGES, METADATA_COLUMNS, ENTRY_SIZE
 import pickle
 import os
 
