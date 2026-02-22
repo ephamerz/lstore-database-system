@@ -387,18 +387,33 @@ class Table:
                     self.decompress_page(batch_cons_page[i])
                     
 
-                seenUpdates = set()
+                seenUpdates = {}
 
+                # Find the newest updates
                 for tail_record in reversed(batch_tail_records):
-                     
-                     rid = tail_record.rid
+                    
+                    # Figure out what columns to update
+                    columns_to_update = []
+                    for value in tail_record.columns:
+                        if value != None:
+                            columns_to_update.append(True)
+                        else:
+                            columns_to_update.append(False)
 
-                     if rid not in seenUpdates:
-                         seenUpdates.add(rid)
-                         
-                         # find the base record we're trying to update
-                         base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
-                         
+                    # Make sure that we get the latest values
+                    base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
+                    for i in range(len(columns_to_update)):
+                        
+                        if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
+                            write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
+                            seenUpdates.update({(base_RID, i) : write_val})
+                    
+
+                    
+                            
+                            
+                            
+
 
                     
 
