@@ -351,11 +351,13 @@ class Table:
     # passes in column and RID desired, gets address of page range, base page, page offset, returns value 
     def read(self, column_to_read, RID):
         #save time calling these
+        self.page_directory_lock.acquire()
         page_directory = self.page_directory
         page_ranges = self.page_ranges
         location = page_directory.get((column_to_read, RID))
         
         if location == None:
+            self.page_directory_lock.release()
             return None
         
         page_range_index = location[0]
@@ -368,9 +370,10 @@ class Table:
         else:
             tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
             read_value = page_range.tail_pages[tail_page_index][column_to_read].read(page_offset)
-        
+        self.page_directory_lock.release()
         #if it isnt there just return now
         if read_value == None:
+
             return None
         #reduce unneeded assignem,ents    
         if column_to_read == SCHEMA_ENCODING_COLUMN:
@@ -390,14 +393,12 @@ class Table:
         
         print("thread is starting")
         while (1):
-            print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
-            if (self.merge_queue.qsize()) > 0:
+            #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
+            
+                # self.page_directory_lock.acquire()
                 # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
-                self.merge_set_lock.acquire()
                 self.merge_set = []
-                self.merge_set_lock.release()
-
                 batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
 
                 # for i in range(len(batch_cons_page)):
@@ -428,38 +429,43 @@ class Table:
                 
                 # overwrite the base pages
                 # not sure if this is the most efficient way tbh
-                while len(batch_cons_page) > 0:
+                self.page_directory_lock.acquire()
+                for base_page in batch_cons_page:
 
 
-
-                    new_base_page_info = batch_cons_page.pop()
+                    
+                    new_base_page_info = base_page
                     new_base_page = new_base_page_info[0] # base page 
                     base_RID_to_update = new_base_page_info[1]
-
-
-
-
                     
                     for i in range(self.num_columns):
                         col_value = seenUpdates.get((base_RID_to_update, i))
                         # if it's None we don't need to do anything
                         if col_value != None:
-                            self.page_directory_lock.acquire()
+                            
                             location = self.page_directory.get((i, base_RID_to_update))
-                            self.page_directory_lock.release()
+
                             page_offset = location[2]
                             new_base_page[i].replace(col_value, page_offset)  
                     # swap the page locations. NEEDS TO BE LOCKED
+                while len(batch_cons_page) > 0:
+
+                    new_base_page_info = batch_cons_page.pop()
+                    new_base_page = new_base_page_info[0] # base page 
+                    base_RID_to_update = new_base_page_info[1]
+
+                    location = self.page_directory.get((0, base_RID_to_update))
                     page_range_index = location[0]
                     page_index = location[1]
                     page_range = self.page_ranges[page_range_index] 
 
-                    self.page_directory_lock.acquire()
+                    
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
                     page_range.base_pages[page_index] = new_base_page
-                    self.page_directory_lock.release()     
-            print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+                self.page_directory_lock.release()
+                        
+            #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
            
            
 
