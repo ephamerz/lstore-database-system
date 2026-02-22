@@ -74,6 +74,7 @@ class PageRange:
         self.basePageToWrite = 0 # a variable that keeps count of the current base page we should write to, I feel like this implementation might need to be revisited when deletion comes along - DH
 
         self.base_pages = []
+        self.tps = [0] * 10 # one tps value for every base page
         for base_page in range(MAX_BASE_PAGES): # make 16 base pages
             self.base_pages.append([])
             for page in range(0, (self.num_columns)): 
@@ -91,3 +92,6 @@ class PageRange:
     def insert_to_tail_page(self):
         #reminder to possibly implement if we decide to do so
         pass
+
+    def updateTPS(self, new_TPS_value, base_page_index):
+        self.tps[base_page_index] = new_TPS_value
