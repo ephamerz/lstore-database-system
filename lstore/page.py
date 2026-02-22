@@ -1,11 +1,8 @@
 # from lstore.table import Record
 import struct
 import os
+from config import CAPACITY, METADATA_COLUMNS, MAX_BASE_PAGES, ENTRY_SIZE
 
-CAPACITY = 4096
-MANDATORY_COLUMNS = 5
-MAX_BASE_PAGES = 16
-ENTRY_SIZE = 8 # 8 bytes
 
 class Page:
 
