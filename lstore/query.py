@@ -91,14 +91,8 @@ class Query:
         # get one RID
         # get RID of base record, then access indirection and get tail record, 
         #get specified column data we want
-        table = self.table
-        index = table.index
-        read = table.read
-        rids = index.locate(search_key_index, search_key)
-        
-        #no needed since select wont call key that DNE
-        #if len(rids) == 0:
-        #    return False
+
+        rids = self.table.index.locate(search_key_index, search_key)
         
         rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
@@ -136,11 +130,6 @@ class Query:
         # get RID of base record, then access indirection and get tail record, 
             # get specified column data we want
         rids = self.table.index.locate(search_key_index, search_key)
-        
-    
-        #not needed since select will never call key that DNE
-        #if len(rids) == 0:
-        #    return False
         
         rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
