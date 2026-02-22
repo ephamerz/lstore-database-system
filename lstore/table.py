@@ -438,21 +438,28 @@ class Table:
                         
                         if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
                             write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
-                            seenUpdates.update({(base_RID, i) : write_val})
+                            seenUpdates.update({(base_RID, i) : (write_val, tail_record.rid)})
                 
                 # overwrite the base pages
                 # not sure if this is the most efficient way tbh
                 self.page_directory_lock.acquire()
                 for base_page in batch_cons_page:
 
-
-                    
                     new_base_page_info = base_page
                     new_base_page = new_base_page_info[0] # base page 
                     base_RID_to_update = new_base_page_info[1]
+
+                    TPS = -1 # TPS can never be -1
                     
                     for i in range(self.num_columns):
-                        col_value = seenUpdates.get((base_RID_to_update, i))
+                        val = seenUpdates.get((base_RID_to_update, i))
+                        col_value = val[0]
+                        tempTPS = val[1]
+
+                        # we want the maximum tail record RID
+                        if tempTPS > TPS:
+                            TPS = tempTPS
+
                         # if it's None we don't need to do anything
                         if col_value != None:
                             
@@ -472,6 +479,8 @@ class Table:
                     page_index = location[1]
                     page_range = self.page_ranges[page_range_index] 
 
+                    # change TPS
+                    new_base_page.updateTPS(TPS, page_index)
                     
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
