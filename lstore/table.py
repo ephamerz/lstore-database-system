@@ -57,6 +57,7 @@ class Table:
         self.page_ranges.append(PageRange(self.total_columns)) # create initial page range
 
         self.page_directory_lock = threading.Lock()
+        self.merge_set_lock = threading.Lock()
 
         # Create background thread for merge
         thread = threading.Thread(target=self.merge)
@@ -281,9 +282,6 @@ class Table:
         for i in range(total_columns):
             page_offsets[i] = page_range.tail_pages[last_tail_page][i].page_size # done so since page sizes might differ due to None values
             page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
-
-        # add to merge
-        self.merge_set.append(Record(values[RID_COLUMN], values[self.key], values))
         
         # add the values to the index. for now just index the primary key, no secondary keys right now
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
@@ -297,8 +295,12 @@ class Table:
             page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
 
         #------------------------------------
+        # add to merge
+        self.merge_set_lock.acquire()
+        self.merge_set.append(Record(values[RID_COLUMN], values[self.key], values))
         if (len(self.merge_set) >= self.merge_threshold_pages):
             self.merge_queue.put(self.merge_set)
+        self.merge_set_lock.release()
 
         return True
 
@@ -330,7 +332,9 @@ class Table:
     # replaces value in specified column and RID
     def replace(self, RID, column_for_replace, value): 
         #save time calling these
+        self.page_directory_lock.acquire()
         location = self.page_directory.get((column_for_replace, RID))
+        self.page_directory_lock.release()
         page_range_index = location[0]
         page_index = location[1]
         page_offset = location[2]
@@ -386,11 +390,13 @@ class Table:
         
         print("thread is starting")
         while (1):
-            # print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
+            print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             if (self.merge_queue.qsize()) > 0:
                 # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
+                self.merge_set_lock.acquire()
                 self.merge_set = []
+                self.merge_set_lock.release()
 
                 batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
 
@@ -438,7 +444,9 @@ class Table:
                         col_value = seenUpdates.get((base_RID_to_update, i))
                         # if it's None we don't need to do anything
                         if col_value != None:
+                            self.page_directory_lock.acquire()
                             location = self.page_directory.get((i, base_RID_to_update))
+                            self.page_directory_lock.release()
                             page_offset = location[2]
                             new_base_page[i].replace(col_value, page_offset)  
                     # swap the page locations. NEEDS TO BE LOCKED
@@ -451,7 +459,7 @@ class Table:
                     self.deallocation_queue.put(old_base_page)
                     page_range.base_pages[page_index] = new_base_page
                     self.page_directory_lock.release()     
-            # print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+            print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
            
            
 
@@ -478,7 +486,9 @@ class Table:
         
         # page_range = self.page_ranges[page_range_index]
 
+            self.page_directory_lock.acquire()
             location = self.page_directory.get((RID_COLUMN, base_RID))
+            self.page_directory_lock.release()
 
             page_range_index = location[0]
             page_index = location[1]
