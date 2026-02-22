@@ -120,11 +120,13 @@ class Table:
 
         # add the mapping to the page directory
         page_range_index = len(page_ranges)-1
+        self.page_directory_lock.acquire()
         for i in range(total_columns):
             # the page range index is always the same.
             # the page is always the same since a record is aligned across the base page thus requiring them all to be written on the same page index in their columns
             # use the page offsets that were saved earlier
             page_directory[(i, rid)] = (page_range_index, base_idx, page_offsets[i])
+        self.page_directory_lock.release()
         
         return True
     
@@ -183,7 +185,9 @@ class Table:
        
         #edit: bring vars from loop//removes duplicated reads in loop
         new_indirection = read(INDIRECTION_COLUMN, baseRID)
+        self.page_directory_lock.acquire()
         page_range_index = page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+        self.page_directory_lock.release()
         page_range = page_ranges[page_range_index]
         
         first_update_cols = []
@@ -231,12 +235,14 @@ class Table:
                 page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
            
             # add the mapping to the page directory
+            self.page_directory_lock.acquire()
             for j in range(total_columns):
                         # the page range index is the one our base record being updated is in
                         # the page is the first available tail page, so the last one 
                         # use the page offsets that were saved earlier 
                         # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
                 page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[j])
+            self.page_directory_lock.release()
 
         # change base record's schema encoding value
         #-> change to list from str for consistency        
@@ -267,7 +273,9 @@ class Table:
         replace(baseRID, INDIRECTION_COLUMN, values[RID_COLUMN])
         
         # get the page range from the base page
+        self.page_directory_lock.acquire()
         page_range_index = page_directory.get((RID_COLUMN, baseRID))[0] # uses base RID, RID_COLUMN as a random column to access the page range index of the base record
+        self.page_directory_lock.release()
         page_range = page_ranges[page_range_index]
         last_tail_page = len(page_range.tail_pages) - 1
         
@@ -287,12 +295,14 @@ class Table:
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
 
         # add the mapping to the page directory
+        self.page_directory_lock.acquire()
         for i in range(total_columns):
             # the page range index is the one our base record being updated is in
             # the page is the first available tail page, so the last one 
             # use the page offsets that were saved earlier 
             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
             page_directory[(i, values[RID_COLUMN])] = (page_range_index, last_tail_page + MAX_BASE_PAGES, page_offsets[i])
+        self.page_directory_lock.release()
 
         #------------------------------------
         # add to merge
@@ -352,9 +362,11 @@ class Table:
     def read(self, column_to_read, RID):
         #save time calling these
         self.page_directory_lock.acquire()
+        self.page_directory_lock.acquire()
         page_directory = self.page_directory
         page_ranges = self.page_ranges
         location = page_directory.get((column_to_read, RID))
+        self.page_directory_lock.release()
         
         if location == None:
             self.page_directory_lock.release()
@@ -393,9 +405,8 @@ class Table:
         
         print("thread is starting")
         while (1):
-            #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
-            
-                # self.page_directory_lock.acquire()
+            print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
+            if (self.merge_queue.qsize()) > 0:
                 # print("merge is starting")
                 batch_tail_records = self.merge_queue.get()
                 self.merge_set = []
@@ -463,9 +474,8 @@ class Table:
                     old_base_page = page_range.base_pages[page_index]
                     self.deallocation_queue.put(old_base_page)
                     page_range.base_pages[page_index] = new_base_page
-                self.page_directory_lock.release()
-                        
-            #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+                    self.page_directory_lock.release()     
+            print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
            
            
 
