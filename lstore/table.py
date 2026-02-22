@@ -822,7 +822,7 @@ class Table:
         
         # save page ranges
         for i, page_range in enumerate(self.page_ranges):
-            #page_range.save(os.path.join(path, f'page_range_{i}')) // this doesnt exist
+            # page_range.save(os.path.join(path, f'page_range_{i}')) // this doesnt exist
 
             #base pages
             #need to get the base page inside the base index and col index so for loops for that    
@@ -865,16 +865,19 @@ class Table:
         with open(os.path.join(path, 'page_directory.pkl'), 'rb') as f:
             self.page_directory = pickle.load(f)
         
+        # reconstruct index, create index for each column
+        self.index = Index(self)
+
         # load page ranges
         '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
         self.page_ranges = []
         i = 0
-        while os.path.exists(os.path.join(path, f'page_range_{i}')):
+        print(os.path.join(path, f'pr_{i}'))
+        while os.path.exists(os.path.join(path, f'pr_{i}')):
             page_range = PageRange(self.total_columns)
-            page_range.load(os.path.join(path, f'page_range_{i}'))
+            page_range.load(os.path.join(path, f'pr_{i}'), self)
             self.page_ranges.append(page_range)
             i += 1
         
-        # reconstruct index
-        self.index = Index(self)
+        
         
