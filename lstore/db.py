@@ -29,7 +29,7 @@ class Database():
 
         #since path is set now can initialize bufferpool disk_manager
         self.disk_manager = DiskManager(path)
-        self.bufferpool = Bufferpool(self.disk_manager, capacity_pages = 2000) #what num is capacity pages?
+        self.bufferpool = Bufferpool(self.disk_manager, capacity_pages = 32) #what num is capacity pages?
 
 
         metadata_path = os.path.join(path, 'db_metadata.pkl')
