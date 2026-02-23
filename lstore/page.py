@@ -166,12 +166,13 @@ class PageRange:
                 new_base_page.append(page)
 
             # populate Index(obj) for each record
-            size = new_base_page[0].size
-            for i in range(size, step = ENTRY_SIZE):
-                for column_index in range(table.METADATA_COLUMNS, self.num_columns):
-                    rid = new_base_page[table.RID_COLUMN].read(i)
-                    value = new_base_page[column_index].read(i)
-                    table.index.insert_record(rid, value, (column_index - table.METADATA_COLUMNS))     
+            # size = new_base_page[0].page_size
+            # for i in range(0, size, ENTRY_SIZE):
+            #     for column_index in range(table.METADATA_COLUMNS, self.num_columns):
+            #         rid = new_base_page[table.RID_COLUMN].read(i)
+            #         value = new_base_page[column_index].read(i)
+            #         table.index.insert_record(rid, value, (column_index - table.METADATA_COLUMNS))  
+            #     i += ENTRY_SIZE
 
             self.base_pages.append(new_base_page)
 
