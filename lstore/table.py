@@ -45,7 +45,7 @@ class Table:
         self.index = Index(self)
         self.bufferpool = bufferpool
         self.disk_manager = disk_manager
-        self.merge_threshold_pages = 50  # The threshold to trigger a merge
+        self.merge_threshold_pages = 10  # The threshold to trigger a merge
         self.merge_set = [] # holds tail records until 50 records, then add queue
         self.merge_queue = Queue() # used by merge thread
         self.deallocation_queue = Queue() # deallocate everything here
@@ -430,7 +430,7 @@ class Table:
             record_to_delete = next_record # move onto the next record
             if next_record == baseRID: # if we reach base record
                 break
-        replace(baseRID, RID_COLUMN, baseRID * -1) # mark base record for death.
+        replace(baseRID, RID_COLUMN, -1) # mark base record for death.
 
         return True
 
@@ -504,7 +504,7 @@ class Table:
     def merge(self):
         
         
-        print("thread is starting")
+
         while (1):
             #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             if (self.merge_queue.qsize()) > 0:
@@ -637,22 +637,34 @@ class Table:
             location = self.page_directory.get((RID_COLUMN, base_RID))
             self.page_directory_lock.release()
 
+            # handle None location gracefully
+            if location is None:
+                continue
+
             page_range_index = location[0]
             page_index = location[1]
-            page_range = self.page_ranges[page_range_index]     
             
-            #if (page_range.base_pages[page_index], base_RID) not in base_page_copy:
-            #    base_page_copy.append((page_range.base_pages[page_index], base_RID))
-                #base_page_copy.add((page_range.base_pages[page_index], base_RID))
+            # validate page_range_index is in bounds
+            if page_range_index >= len(self.page_ranges):
+                continue
+                
+            page_range = self.page_ranges[page_range_index]
 
             #change it to have helper to use buffer
             #just changing page_range.base_pages[page_index], base_RID to base_page and base_key
-            base_page, base_key = self._get_page(page_range_index, page_index, RID_COLUMN)
-            #done needing it pinned so unpin
-            self.bufferpool.unpin(base_key)
-            #changing base_RID to base_key crashed so dont do that
-            if (base_page, base_RID) not in base_page_copy:
-                base_page_copy.append((base_page, base_RID))
+            #guarantees unpin even if exception occurs after _get_page
+            try:
+                base_page, base_key = self._get_page(page_range_index, page_index, RID_COLUMN)
+                try:
+                    #changing base_RID to base_key crashed so dont do that
+                    if (base_page, base_RID) not in base_page_copy:
+                        base_page_copy.append((base_page, base_RID))
+                finally:
+                    #done needing it pinned so unpin
+                    self.bufferpool.unpin(base_key)
+            except Exception:
+                #if _get_page fails, continue to next record without crashing
+                continue
 
 
 
