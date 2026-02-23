@@ -110,6 +110,14 @@ class Bufferpool:
         # if the page is dirty, must flush it to the disk before removed
         # LRU iterates from oldest to newest:
         for victim_key in list(self.lru.keys()):
+            # skip keys in lru but not in frames cause of desync
+            if victim_key not in self.frames:
+                try:
+                    del self.lru[victim_key]
+                except KeyError:
+                    pass
+                continue
+            
             frame = self.frames[victim_key]
 
             # only remove if not pinned
@@ -119,9 +127,15 @@ class Bufferpool:
                     self.disk.write_page(victim_key, frame.page)
                     frame.dirty = False
 
-                # remove from both maps
-                del self.frames[victim_key]
-                del self.lru[victim_key]
+                # remove from both maps with error handling
+                try:
+                    del self.frames[victim_key]
+                except KeyError:
+                    pass  # already removed, continue
+                try:
+                    del self.lru[victim_key]
+                except KeyError:
+                    pass  # already removed, continue
                 return
 
         # safety, all pages are pinned and we cannot remove anymore
