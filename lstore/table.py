@@ -464,7 +464,6 @@ class Table:
         self.page_directory_lock.acquire()
 
         page_directory = self.page_directory
-        page_ranges = self.page_ranges
         location = page_directory.get((column_to_read, RID))
 
         
@@ -475,7 +474,6 @@ class Table:
         page_range_index = location[0]
         page_index = location[1]
         page_offset = location[2]
-        page_range = page_ranges[page_range_index]
         
         #if page_index < MAX_BASE_PAGES:
         #    read_value = page_range.base_pages[page_index][column_to_read].read(page_offset)
@@ -847,19 +845,40 @@ class Table:
         with open(os.path.join(path, 'page_directory.pkl'), 'rb') as f:
             self.page_directory = pickle.load(f)
 
-        # reconstruct index
+        # reconstruct page_ranges so table code expecting this list still works
+        # since we have the page directory, use this value so it stays 100% true
+        max_page_range_index = -1
+        for location in self.page_directory.values():
+            page_range_index = location[0]
+            if page_range_index > max_page_range_index:
+                max_page_range_index = page_range_index
+
+        self.page_ranges = []
+
+        # create page range objects to add into
+        for i in range(max_page_range_index + 1):
+            self.page_ranges.append(PageRange(self.total_columns))
+
+        # reconstruct index from persisted records through page_directory-backed reads
         self.index = Index(self)
 
-        # load page ranges
-        '''edit to make sure it doesnt get mixed up w any preexisitng page_ranges to prevent many to many'''
-        self.page_ranges = []
+        base_rids = []
+        # get all valid base RIDS from page_directory (not those that are deleted)
+        for (column, rid) in self.page_directory.keys():
+            if column == RID_COLUMN and rid >= 0:
+                base_rids.append(rid) 
+
+        # for EVERY SINGLE RID and column insert into indexes
+        for rid in base_rids:
+            # for every user column
+            for column in range(self.num_columns):
+                value = self.read(column + METADATA_COLUMNS, rid)
+                if value is not None:
+                    self.index.insert_record(rid, value, column)
         i = 0
-        print(os.path.join(path, f'page_range_{i}'))
         while os.path.exists(os.path.join(path, f'page_range_{i}')):
             page_range = PageRange(self.total_columns)
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
-            self.page_ranges.append(page_range)
             i += 1
-
             
         
