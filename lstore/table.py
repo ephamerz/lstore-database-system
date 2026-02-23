@@ -830,9 +830,6 @@ class Table:
         with open(os.path.join(path, 'page_directory.pkl'), 'wb') as f:
             pickle.dump(self.page_directory, f)
         
-        # save page ranges
-        for i, page_range in enumerate(self.page_ranges):
-            page_range.save(os.path.join(path, f'page_range_{i}'))
 
     """
     Load table from disk.
@@ -887,10 +884,6 @@ class Table:
                 value = self.read(column + METADATA_COLUMNS, rid)
                 if value is not None:
                     self.index.insert_record(rid, value, column)
-        i = 0
-        while os.path.exists(os.path.join(path, f'page_range_{i}')):
-            page_range = PageRange(self.total_columns)
-            page_range.load(os.path.join(path, f'page_range_{i}'), self)
-            i += 1
+        
             
         
