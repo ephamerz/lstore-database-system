@@ -503,8 +503,6 @@ class Table:
 
     def merge(self):
         
-        
-
         while (1):
             #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             if (self.merge_queue.qsize()) > 0:
@@ -538,70 +536,59 @@ class Table:
                     for i in range(len(columns_to_update)):
                         if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
                             write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
-                            seenUpdates.update({(base_RID, i) : (write_val)})
+                            seenUpdates.update({(base_RID, i) : (write_val, tail_record.rid)})
                 
                 # overwrite the base pages
                 # not sure if this is the most efficient way tbh
                 self.page_directory_lock.acquire()
-                for base_page in batch_cons_page:
-
-                    new_base_page_info = base_page
-                    new_base_page = new_base_page_info[0] # base page 
-                    base_RID_to_update = new_base_page_info[1]
-
-
-                    # TPS = -1 # TPS can never be -1
-                    
-                    # for i in range(self.num_columns):
-                    #     val = seenUpdates.get((base_RID_to_update, i))
-                    #     col_value = val[0]
-                    #     tempTPS = val[1]
-
-                    #     # we want the maximum tail record RID
-                    #     if tempTPS > TPS:
-                    #         TPS = tempTPS
-
-                    #     # if it's None we don't need to do anything
-                    #     if col_value != None:
-                            
-                    #         location = self.page_directory.get((i, base_RID_to_update))
-
-                    #         page_offset = location[2]
-                    #         new_base_page[i].replace(col_value, page_offset)  
-                    #         # change TPS
-                    #         # new_base_page.updateTPS(TPS, page_index)
 
                 # swap the page locations. NEEDS TO BE LOCKED
                 for base_page in batch_cons_page:
 
                     new_base_page_info = base_page
                     new_base_page = new_base_page_info[0] # base page 
-                    base_RID_to_update = new_base_page_info[1]
+                    base_RID_to_update = new_base_page_info[1] # base page's RID
 
                     location = self.page_directory.get((0, base_RID_to_update))
                     page_range_index = location[0]
                     page_index = location[1]
                     page_range = self.page_ranges[page_range_index] 
-
                     
                     #swaps directly so changing it to use helper for buffer
                     #old_base_page = page_range.base_pages[page_index]
                     #self.deallocation_queue.put(old_base_page)
                     #page_range.base_pages[page_index] = new_base_page
 
+                    
+                    TPS = -1 # TPS can't be negative, this makes it a minimum always
+
                     #merges the col values to base going through buffer
                     for i in range(METADATA_COLUMNS, self.total_columns): #skip the metadatacols
                         #newest merged value for rid and in col
                         newest_value = seenUpdates.get((base_RID_to_update, i))
+                        
                         #if theres no update end it earlier
-                        if newest_value == None:
+                        if newest_value is None or None in newest_value:
                             continue
+
+                        write_val = newest_value[0]
+                        tempTPS = newest_value[1]
+
+
                         #where to store newest_value in page_directory
                         value_location = self.page_directory.get((i, base_RID_to_update))
+                        page_range_index = value_location[0]
+                        page_index = value_location[1]
+                        page_range = self.page_ranges[page_range_index] 
+
+                        if (tempTPS > TPS):
+                            TPS = tempTPS
+                            page_range.updateTPS(TPS, page_index)
+
                         #get the location
                         page_offset = value_location[2]
                         #use the helper to involve buffer
-                        self._update_page(page_range_index, page_index,i, newest_value, page_offset)
+                        self._update_page(page_range_index, page_index,i, write_val, page_offset)
 
 
                 self.page_directory_lock.release()     
@@ -749,6 +736,16 @@ class Table:
         result =[]  # list of values in same order as col_indices
         read = self.read
 
+        indirection_rid = read(INDIRECTION_COLUMN, rid)
+        TPS = self.getTPS(rid)
+
+        # the base page will already hold everything in this case
+        if (TPS >= indirection_rid):
+            for col_idx in col_indices:
+                physical_col_idx = col_idx + METADATA_COLUMNS
+                result.append(read(physical_col_idx, rid))
+            return result
+
         if relative_version == 0:
             # latest version, read base schema
             base_schema = read(SCHEMA_ENCODING_COLUMN, rid)
@@ -892,5 +889,20 @@ class Table:
             page_range = PageRange(self.total_columns)
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
             i += 1
+
+    # gets the TPS value of a base page given its RID
+    def getTPS(self, RID):
+        self.page_directory_lock.acquire()
+        page_directory = self.page_directory
+        page_ranges = self.page_ranges
+        # use any column doesn't matter
+        location = page_directory.get((RID_COLUMN, RID))
+        page_range_index = location[0]
+        page_index = location[1]
+        page_range = page_ranges[page_range_index]
+        self.page_directory_lock.release()
+        return page_range.tps[page_index]
+    
+    
             
         
