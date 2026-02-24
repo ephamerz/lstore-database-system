@@ -449,13 +449,7 @@ class Table:
 
         # need to remove from index
         for i in range(self.num_columns):
-            #could be wrong so swapping out for now
-            #index.delete_record(baseRID, read(i , baseRID), i)
-        #editing this for last case
-            value = read(i + METADATA_COLUMNS, baseRID)
-            if value is not None:
-                index.delete_record(baseRID, value, i)
-                
+            index.delete_record(baseRID, read(i , baseRID), i)
 
         # needd to remove from page directory
         self.page_directory_lock.acquire()
