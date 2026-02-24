@@ -897,8 +897,6 @@ class Table:
         # reconstruct index from persisted records through page_directory-backed reads
         self.index = Index(self)
 
-        '''
-        REMOVING FOR DURABLITY DUPE
         base_rids = []
         # get all valid base RIDS from page_directory (not those that are deleted)
         for (column, rid) in self.page_directory.keys():
@@ -918,8 +916,6 @@ class Table:
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
             i += 1
             # page ranges themselves are loaded lazily through disk manager/bufferpool system when needed
-        '''
-
 
     # gets the TPS value of a base page given its RID
     def getTPS(self, RID):
