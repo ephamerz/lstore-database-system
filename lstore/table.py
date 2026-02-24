@@ -583,19 +583,16 @@ class Table:
 
                         if (tempTPS > TPS):
                             TPS = tempTPS
-                            page_range.updateTPS(TPS, page_index)
 
                         #get the location
                         page_offset = value_location[2]
                         #use the helper to involve buffer
                         self._update_page(page_range_index, page_index,i, write_val, page_offset)
 
-
+                    if TPS != -1:
+                        page_range.updateTPS(TPS, page_index)
                 self.page_directory_lock.release()     
             #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
-
-           
-           
 
 
     # @param [Record] tail_pages: list of tail records that aren't merged yet (THIS SHOULD BE LOOKED INTO AS L STORE PAPER ITSELF CONFLICTS ON TOPIC 4.1)
