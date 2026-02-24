@@ -1,6 +1,6 @@
 from lstore.table import Table, Record
 from lstore.index import Index
-
+from lstore.config import METADATA_COLUMNS
 
 
 class Query:
@@ -84,7 +84,6 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
-        return self.select_version(search_key, search_key_index, projected_columns_index, 0)
         #introduce some sort of rab bit hunting through the tail records, 
             # as well as checking what values we have gathered already
         #rid key map
@@ -92,13 +91,19 @@ class Query:
         # get RID of base record, then access indirection and get tail record, 
         #get specified column data we want
 
-        # rids = self.table.index.locate(search_key_index, search_key)
+        rids = self.table.index.locate(search_key_index, search_key)
+        if len(rids) == 0:
+            return []
         
-        # rid = rids[0]
-        # cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
 
-        # #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
-        # vals = self.table.get_values_by_rid(rid, cols, 0)
+        #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
+        records = []
+        for rid in rids:
+            # get record(s) for the rid, projected cols, and version 0 
+            vals = self.table.get_values_by_rid(rid, cols, 0)
+            records.append(Record(rid, search_key, vals))
 
 
         '''
@@ -119,7 +124,7 @@ class Query:
                 else:
                     vals.append(read(physical_col_idx, rid))
         '''
-        #return [Record(rid, search_key, vals)]
+        return records
 
 
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
@@ -130,14 +135,18 @@ class Query:
         # get RID of base record, then access indirection and get tail record, 
             # get specified column data we want
         rids = self.table.index.locate(search_key_index, search_key)
+        if len(rids) == 0:
+            return []
         
-        
-        rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
-        vals = self.table.get_values_by_rid(rid, cols, relative_version)  
 
+        records = []
+        for rid in rids:
+            # get record(s) for the rid, projected cols, and version 0 
+            vals = self.table.get_values_by_rid(rid, cols, 0)
+            records.append(Record(rid, search_key, vals))
 
-        return [Record(rid, search_key, vals)]
+        return records
 
 
 
@@ -282,10 +291,9 @@ class Query:
             # for each base RID returned in the range
             for rid in rids:
                 # read primary key value directly from base
-                #primary_key = self.table.read(self.table.key + 4, rid)  # +4 for metadata
+                primary_key = self.table.read(self.table.key + METADATA_COLUMNS, rid)  # +4 for metadata
                 # retrieve the value of aggregate column at requested relative version through rabbit hunt
-                #value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
-                value = self.table.get_values_by_rid(rid, [aggregate_column_index], relative_version)[0]
+                value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
                 # add to total if valud value was returned
                 if value is not None:
                     total += value
@@ -293,9 +301,6 @@ class Query:
             return total
         except:
             return False
-        # except:
-        #     print("excepted")
-        #     return False
 
 
     
