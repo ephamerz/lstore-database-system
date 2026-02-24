@@ -146,6 +146,8 @@ class Query:
         for rid in rids:
             # get record(s) for the rid, projected cols, and version 0 
             vals = self.table.get_values_by_rid(rid, cols, relative_version)
+            if vals == []:
+                continue
             records.append(Record(rid, vals[0], vals))
 
         return records
