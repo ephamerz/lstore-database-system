@@ -270,16 +270,30 @@ class BTree:
     # finds all RIDs associated to the value k (not a tuple)
     def BtreeSearch(self, x, k, RIDs):
         i = 0 # the index of the child to recurse into
-        # look for the child we need to recurse into
+        # look for the first key >= k
         while i < len(x.keys) and k > x.keys[i][0]:
             i += 1
-        # actually search the keys for values
+
+        # collect matching keys stored in this node
         for j in range(len(x.keys)):
             if k == x.keys[j][0]:
-                RIDs.append(x.keys[j][1]) # store the RID
+                RIDs.append(x.keys[j][1])
+
         if x.leaf:
             return None
-        return self.BtreeSearch(x.child[i], k, RIDs)
+
+        # duplicates can be split across multiple children when separators equal k.
+        # search the whole child span that can still contain k.
+        left = i
+        while left > 0 and x.keys[left - 1][0] == k:
+            left -= 1
+
+        right = i
+        while right < len(x.keys) and x.keys[right][0] == k:
+            right += 1
+
+        for child_index in range(left, right + 1):
+            self.BtreeSearch(x.child[child_index], k, RIDs)
     
     # x: node we are searching
     # k: the key we are looking for
