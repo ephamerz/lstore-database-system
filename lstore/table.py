@@ -451,7 +451,7 @@ class Table:
         for i in range(self.num_columns):
             #could be wrong so swapping out for now
             #index.delete_record(baseRID, read(i , baseRID), i)
-        #editing this for last case
+        #editing this to fix delete index clean up by not reading metadata cols for i
             value = read(i + METADATA_COLUMNS, baseRID)
             if value is not None:
                 index.delete_record(baseRID, value, i)
