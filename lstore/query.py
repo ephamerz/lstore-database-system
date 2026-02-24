@@ -160,35 +160,8 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
-        # # locating our record using the primary key, index to locate faster
-        # rid = self.table.index.locate(self.table.key, primary_key)
-
-        # # if the record doesn't exist, the update doesn't go through
-        # if rid is None:
-        #     return False
-        
-        # try:
-        #     # reading the current record directly
-        #     record = self.table.page_directory[rid]
-
-        #     # starting the new version as a copy of the most recent
-        #     new_record = list(record)
-
-        #     # updating column by column
-        #     for i in range(len(columns)):
-        #         if columns[i] is not None:
-        #             # to not change the primary key
-        #             if i == self.table.key and columns[i] != primary_key:
-        #                 return False
-        #             new_record[i] = columns[i]
-
-        #     # appending the newest version, but not overwriting the old ones
-        #     self.table.page_directory[rid] = tuple(new_record)
-
-        #     return True
-        # except:
-        #     return False
-        # pass
+        if columns[self.table.key] != None or columns[self.table.key] != 0 or columns[self.table.key] == '0' or columns[self.table.key] == 'None' or columns[self.table.key] == '' or columns[self.table.key] is not None:
+            return False
 
         return self.table.update_record(primary_key, columns)
 
