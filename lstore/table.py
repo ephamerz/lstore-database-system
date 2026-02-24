@@ -154,6 +154,8 @@ class Table:
         page_directory = self.page_directory
         page_range = page_ranges[-1] # the page range we want to write to is the last one in the array
         
+        if self.index.locate(self.key, columns[self.key]) != []: # if primary key already exists
+            return False
         # initialize an array with the complete list of data values to insert (metadata values + the record's values)
         values = [0] * METADATA_COLUMNS
         values[INDIRECTION_COLUMN] = 0 # not needed but included for clarity
