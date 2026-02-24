@@ -903,13 +903,13 @@ class Table:
             if column == RID_COLUMN and rid >= 0:
                 base_rids.append(rid) 
 
-        # for EVERY SINGLE RID and column insert into indexes
-        for rid in base_rids:
-            # for every user column
-            for column in range(self.num_columns):
-                value = self.read(column + METADATA_COLUMNS, rid)
-                if value is not None:
-                    self.index.insert_record(rid, value, column)
+        # # for EVERY SINGLE RID and column insert into indexes
+        # for rid in base_rids:
+        #     # for every user column
+        #     for column in range(self.num_columns):
+        #         value = self.read(column + METADATA_COLUMNS, rid)
+        #         if value is not None:
+        #             self.index.insert_record(rid, value, column)
         i = 0
         while os.path.exists(os.path.join(path, f'page_range_{i}')):
             page_range = PageRange(self.total_columns)
