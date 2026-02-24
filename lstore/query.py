@@ -131,6 +131,7 @@ class Query:
             # get specified column data we want
         rids = self.table.index.locate(search_key_index, search_key)
         
+        
         rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
         vals = self.table.get_values_by_rid(rid, cols, relative_version)  
