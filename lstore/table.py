@@ -426,10 +426,6 @@ class Table:
         if len(RIDs) == 0: # record does not exist
             return False 
         baseRID = RIDs[0]
-
-        #edit to try if this fixes the last thing
-        index.delete_record(baseRID, primary_key, key_col)
-
         record_to_delete = read(INDIRECTION_COLUMN, baseRID) # get the newest tail
         
         while 1:
