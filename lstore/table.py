@@ -332,17 +332,6 @@ class Table:
             for j in range(total_columns):
                 page_offsets[j] = self._write_page(page_range_index, page_index, j, first_update[j]) #page_range.tail_pages[last_tail_page][j].page_size # done so since page sizes might differ due to None values
                 #removed: page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
-           
-            # add the mapping to the page directory
-            # self.page_directory_lock.acquire()
-            # for j in range(total_columns):
-            #             # the page range index is the one our base record being updated is in
-            #             # the page is the first available tail page, so the last one 
-            #             # use the page offsets that were saved earlier 
-            #             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-                #print(f'page index is {page_index}')
-            #     page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, page_index, page_offsets[j]) #last_tail_page + MAX_BASE_PAGES
-            # self.page_directory_lock.release()
 
         # change base record's schema encoding value
         #-> change to list from str for consistency        
@@ -410,13 +399,10 @@ class Table:
 
         # add the new values to the index
         self.page_directory_lock.release()
-        #print('going into for loop')
+
         for i in range(self.num_columns):
-            #print('for loop iteration')
             if (values[i+METADATA_COLUMNS] != None):
-                #print('starting delete')
                 self.index.delete_record(old_baseRID, old_values[i], i)
-                #print('delete over')
                 self.index.insert_record(old_baseRID, values[i + METADATA_COLUMNS], i)
         #print('lock released')
 
@@ -807,17 +793,7 @@ class Table:
                     # schema is updated but no tail exists, so read from base
                     result.append(read(physical_col_idx, rid))
                     continue #edit
-                '''
-                else:
-                    # check if the latest tail has the column
-                    tail_schema = read(SCHEMA_ENCODING_COLUMN, indirection_rid)
-                    # if newest tail has the column, it becomes the latest value
-                    if tail_schema[col_idx] == '1':
-                        result.append(read(physical_col_idx, indirection_rid))
-                    else:
-                        # case where newest tail doesn't have the column, latest value stays from base record
-                        result.append(read(physical_col_idx, rid))
-                '''
+
                 latest_value = None
                 current = indirection_rid
 

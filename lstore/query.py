@@ -105,27 +105,15 @@ class Query:
             vals = self.table.get_values_by_rid(rid, cols, 0)
             if vals == []:
                 continue
-            records.append(Record(rid, vals[0], vals))
 
-
-        '''
-        base_schema = read(3, rid)
-        indirection_rid = read(0, rid)
-        tail_schema = None
-        if indirection_rid is not None and indirection_rid != 0:
-            tail_schema = read(3, indirection_rid)
-
-        vals = []
-        for col_idx in cols:
-            physical_col_idx = col_idx + METADATA_COLUMNS
-            if base_schema[col_idx] == '0' or indirection_rid is None or indirection_rid == 0:
-                vals.append(read(physical_col_idx, rid))
+            if search_key_index in cols:
+                key_val = vals[cols.index(search_key_index)]
             else:
-                if tail_schema is not None and tail_schema[col_idx] == '1':
-                    vals.append(read(physical_col_idx, indirection_rid))
-                else:
-                    vals.append(read(physical_col_idx, rid))
-        '''
+                key_val = self.table.get_values_by_rid(rid, [search_key_index], 0)[0]
+
+            if key_val != search_key:
+                continue
+            records.append(Record(rid, key_val, vals))
         return records
 
 
