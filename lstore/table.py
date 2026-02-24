@@ -405,6 +405,7 @@ class Table:
         self.merge_set.append(Record(values[RID_COLUMN], values[self.key], values))
         if (len(self.merge_set) >= self.merge_threshold_pages):
             self.merge_queue.put(self.merge_set)
+            self.merge_set = []
         self.merge_set_lock.release()
 
         return True
@@ -512,94 +513,97 @@ class Table:
         
         while (1):
             #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
-            if (self.merge_queue.qsize()) > 0:
-                # print("merge is starting")
-                batch_tail_records = self.merge_queue.get()
-                self.merge_set_lock.acquire()
-                self.merge_set = []
-                self.merge_set_lock.release()
-                batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
+            try:
+                self.merge_queue.get(timeout=0.05) == None # if there is nothing to merge, skip this iteration of the loop and check again
+            except:
+                continue
+            # print("merge is starting")
+            batch_tail_records = self.merge_queue.get()
+            self.merge_set_lock.acquire()
+            self.merge_set = []
+            self.merge_set_lock.release()
+            batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
 
-                # for i in range(len(batch_cons_page)):
-                #     self.decompress_page(batch_cons_page[i])
-                    
-
-                seenUpdates = {}
-
-                # Find the newest updates
-                for tail_record in reversed(batch_tail_records):
-                    
-                    # Figure out what columns to update
-                    columns_to_update = []
-                    for value in tail_record.columns:
-                        if value != None:
-                            columns_to_update.append(True)
-                        else:
-                            columns_to_update.append(False)
-
-                    # Make sure that we get the latest values
-                    base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
-
-                    for i in range(len(columns_to_update)):
-                        if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
-                            write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
-                            seenUpdates.update({(base_RID, i) : (write_val, tail_record.rid)})
+            # for i in range(len(batch_cons_page)):
+            #     self.decompress_page(batch_cons_page[i])
                 
-                # overwrite the base pages
-                # not sure if this is the most efficient way tbh
-                self.page_directory_lock.acquire()
 
-                # swap the page locations. NEEDS TO BE LOCKED
-                for base_page in batch_cons_page:
+            seenUpdates = {}
 
-                    new_base_page_info = base_page
-                    new_base_page = new_base_page_info[0] # base page 
-                    base_RID_to_update = new_base_page_info[1] # base page's RID
+            # Find the newest updates
+            for tail_record in reversed(batch_tail_records):
+                
+                # Figure out what columns to update
+                columns_to_update = []
+                for value in tail_record.columns:
+                    if value != None:
+                        columns_to_update.append(True)
+                    else:
+                        columns_to_update.append(False)
 
-                    location = self.page_directory.get((0, base_RID_to_update))
-                    page_range_index = location[0]
-                    page_index = location[1]
+                # Make sure that we get the latest values
+                base_RID = self.read(BASE_RID_COLUMN, tail_record.rid)
+
+                for i in range(len(columns_to_update)):
+                    if columns_to_update[i] is True and (base_RID, i) not in seenUpdates:
+                        write_val = self.read(i + METADATA_COLUMNS, tail_record.rid)
+                        seenUpdates.update({(base_RID, i) : (write_val, tail_record.rid)})
+            
+            # overwrite the base pages
+            # not sure if this is the most efficient way tbh
+            self.page_directory_lock.acquire()
+
+            # swap the page locations. NEEDS TO BE LOCKED
+            for base_page in batch_cons_page:
+
+                new_base_page_info = base_page
+                new_base_page = new_base_page_info[0] # base page 
+                base_RID_to_update = new_base_page_info[1] # base page's RID
+
+                location = self.page_directory.get((0, base_RID_to_update))
+                page_range_index = location[0]
+                page_index = location[1]
+                page_range = self.page_ranges[page_range_index] 
+                
+                #swaps directly so changing it to use helper for buffer
+                #old_base_page = page_range.base_pages[page_index]
+                #self.deallocation_queue.put(old_base_page)
+                #page_range.base_pages[page_index] = new_base_page
+
+                
+                TPS = -1 # TPS can't be negative, this makes it a minimum always
+
+                #merges the col values to base going through buffer
+                for i in range(METADATA_COLUMNS, self.total_columns): #skip the metadatacols
+                    #newest merged value for rid and in col
+                    newest_value = seenUpdates.get((base_RID_to_update, i))
+                    
+                    #if theres no update end it earlier
+                    if newest_value is None or None in newest_value:
+                        continue
+
+                    write_val = newest_value[0]
+                    tempTPS = newest_value[1]
+
+
+                    #where to store newest_value in page_directory
+                    value_location = self.page_directory.get((i, base_RID_to_update))
+                    page_range_index = value_location[0]
+                    page_index = value_location[1]
                     page_range = self.page_ranges[page_range_index] 
-                    
-                    #swaps directly so changing it to use helper for buffer
-                    #old_base_page = page_range.base_pages[page_index]
-                    #self.deallocation_queue.put(old_base_page)
-                    #page_range.base_pages[page_index] = new_base_page
 
-                    
-                    TPS = -1 # TPS can't be negative, this makes it a minimum always
+                    if (tempTPS > TPS):
+                        TPS = tempTPS
 
-                    #merges the col values to base going through buffer
-                    for i in range(METADATA_COLUMNS, self.total_columns): #skip the metadatacols
-                        #newest merged value for rid and in col
-                        newest_value = seenUpdates.get((base_RID_to_update, i))
-                        
-                        #if theres no update end it earlier
-                        if newest_value is None or None in newest_value:
-                            continue
+                    #get the location
+                    page_offset = value_location[2]
+                    #use the helper to involve buffer
+                    self._update_page(page_range_index, page_index,i, write_val, page_offset)
 
-                        write_val = newest_value[0]
-                        tempTPS = newest_value[1]
-
-
-                        #where to store newest_value in page_directory
-                        value_location = self.page_directory.get((i, base_RID_to_update))
-                        page_range_index = value_location[0]
-                        page_index = value_location[1]
-                        page_range = self.page_ranges[page_range_index] 
-
-                        if (tempTPS > TPS):
-                            TPS = tempTPS
-
-                        #get the location
-                        page_offset = value_location[2]
-                        #use the helper to involve buffer
-                        self._update_page(page_range_index, page_index,i, write_val, page_offset)
-
-                    if TPS != -1:
-                        page_range.updateTPS(TPS, page_index)
-                self.page_directory_lock.release()     
-            #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
+                if TPS != -1:
+                    page_range.updateTPS(TPS, page_index)
+            self.page_directory_lock.release()     
+        #print("MERGE END!!\n\n\n\n\n\n\n\n\n\n")
 
 
     # @param [Record] tail_pages: list of tail records that aren't merged yet (THIS SHOULD BE LOOKED INTO AS L STORE PAPER ITSELF CONFLICTS ON TOPIC 4.1)
