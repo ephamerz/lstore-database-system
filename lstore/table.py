@@ -173,6 +173,7 @@ class Table:
         if not self._has_capacity(page_range_index,base_idx, 0, ENTRY_SIZE): # len(values[i]) is future proofing lol -DH
             base_idx += 1 
             page_range.basePageToWrite = base_idx
+            #print(f'base page to write is {base_idx}')
        
         # if the page range is full, then allocate a new page range
             if base_idx >= MAX_BASE_PAGES:
@@ -237,6 +238,13 @@ class Table:
         page_directory = self.page_directory
         page_ranges = self.page_ranges
         total_columns = self.total_columns
+
+        # save the old values for the index to replace them later
+        old_values = []
+        old_baseRID = baseRID
+        for i in range(self.num_columns):
+            old_values.append(read(i+METADATA_COLUMNS, baseRID))
+
 
         # read the indirection value's location in the base pages
         # we do this because we need to access the old version of the record and also link up the new tail page with the old tail page pointer
@@ -332,6 +340,7 @@ class Table:
             #             # the page is the first available tail page, so the last one 
             #             # use the page offsets that were saved earlier 
             #             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
+                #print(f'page index is {page_index}')
             #     page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, page_index, page_offsets[j]) #last_tail_page + MAX_BASE_PAGES
             # self.page_directory_lock.release()
 
@@ -390,6 +399,7 @@ class Table:
         # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
 
         # add the mapping to the page directory
+        #print('lock acquire')
         self.page_directory_lock.acquire()
         for i in range(total_columns):
             # the page range index is the one our base record being updated is in
@@ -397,7 +407,18 @@ class Table:
             # use the page offsets that were saved earlier 
             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
             page_directory[(i, values[RID_COLUMN])] = (page_range_index, page_index, page_offsets[i]) #last_tail_page + MAX_BASE_PAGES
+
+        # add the new values to the index
         self.page_directory_lock.release()
+        #print('going into for loop')
+        for i in range(self.num_columns):
+            #print('for loop iteration')
+            if (values[i+METADATA_COLUMNS] != None):
+                #print('starting delete')
+                self.index.delete_record(old_baseRID, old_values[i], i)
+                #print('delete over')
+                self.index.insert_record(old_baseRID, values[i + METADATA_COLUMNS], i)
+        #print('lock released')
 
         #------------------------------------
         # add to merge
@@ -436,7 +457,7 @@ class Table:
             if next_record == baseRID: # if we reach base record
                 break
 
-        # print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
+        # #print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
         if baseRID > 0: 
             replace(baseRID, RID_COLUMN, -abs(baseRID)) # mark base record for death.
 

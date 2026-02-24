@@ -57,6 +57,17 @@ class Index:
     def drop_index(self, column_number):
         pass
 
+    """
+    # delete a record from a given column in the index
+    """
+    def delete_record(self, RID, value, column):
+        #print('this got called')
+        key = (value, RID)
+        btree = self.indices[column]
+        root = btree.root
+        #print('starting btree delete')
+        btree.delete(root, key)
+
 # Source: https://www.geeksforgeeks.org/dsa/b-tree-in-python/. Code is a modified version of GeeksforGeeks's.
 class BTreeNode:
     def __init__(self, leaf=False):
@@ -129,7 +140,8 @@ class BTree:
     def delete(self, x, k):
         t = self.t
         i = 0
-        while i < len(x.keys) and k[0] > x.keys[i][0]:
+        #print(f'k[0] is {k[0]} x.keys[i][0] is {x.keys[i][0]}')
+        while i < len(x.keys) and int(k[0]) > x.keys[i][0]:
             i += 1
         if x.leaf:
             if i < len(x.keys) and x.keys[i] == k:
