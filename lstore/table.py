@@ -542,7 +542,6 @@ class Table:
             except:
                 continue
             # print("merge is starting")
-            batch_tail_records = self.merge_queue.get()
             self.merge_set_lock.acquire()
             self.merge_set = []
             self.merge_set_lock.release()
