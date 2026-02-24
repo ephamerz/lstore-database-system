@@ -18,13 +18,13 @@ class DiskManager:
         # directory for the table
         table_dir = os.path.join(self.db_path, table_name)
         # directory for specific page range of that table
-        page_range_dir = os.path.join(table_dir, f"pr_{page_range_index}")
+        page_range_dir = os.path.join(table_dir, f"page_range_{page_range_index}")
         # create directories if they do not exist
         os.makedirs(page_range_dir, exist_ok=True)
         # decide whether base or tail
         kind = "tail" if is_tail else "base"
         # file name uniquely identifies page position and column
-        filename = f"{kind}_p{page_index}_c{column_index}.bin"
+        filename = f"{kind}_page_{page_index}_col_{column_index}.bin"
         # return full path to the page file
         return os.path.join(page_range_dir, filename)
 

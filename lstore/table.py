@@ -823,6 +823,9 @@ class Table:
         # save page directory
         with open(os.path.join(path, 'page_directory.pkl'), 'wb') as f:
             pickle.dump(self.page_directory, f)
+
+        for i, page_range in enumerate(self.page_ranges):
+            page_range.save(os.path.join(path, f'page_range_{i}'))
         
 
     """
@@ -883,6 +886,7 @@ class Table:
             page_range = PageRange(self.total_columns)
             page_range.load(os.path.join(path, f'page_range_{i}'), self)
             i += 1
+            # page ranges themselves are loaded lazily through disk manager/bufferpool system when needed
 
     # gets the TPS value of a base page given its RID
     def getTPS(self, RID):
