@@ -461,6 +461,16 @@ class Table:
         if baseRID > 0: 
             replace(baseRID, RID_COLUMN, -abs(baseRID)) # mark base record for death.
 
+        # need to remove from index
+        for i in range(self.num_columns):
+            index.delete_record(baseRID, read(i , baseRID), i)
+
+        # needd to remove from page directory
+        self.page_directory_lock.acquire()
+        for i in range(self.total_columns):
+            self.page_directory.pop((i, baseRID), None)
+        self.page_directory_lock.release()
+
         return True
 
     # replaces value in specified column and RID
@@ -768,6 +778,8 @@ class Table:
         read = self.read
 
         indirection_rid = read(INDIRECTION_COLUMN, rid)
+        if indirection_rid == None:
+            return []
         TPS = self.getTPS(rid)
 
         # the base page will already hold everything in this case
@@ -930,6 +942,11 @@ class Table:
         page_ranges = self.page_ranges
         # use any column doesn't matter
         location = page_directory.get((RID_COLUMN, RID))
+
+        #handle deleted record
+        if location == None:
+            self.page_directory_lock.release()
+            return None
         page_range_index = location[0]
         page_index = location[1]
         page_range = page_ranges[page_range_index]
