@@ -1,6 +1,3 @@
-from lstore.config import RID_COLUMN, MAX_BASE_PAGES
-
-
 """
 A data strucutre holding indices for various columns of a table. 
 Key column should be indexd by default, other columns can be indexed through this object.
@@ -13,7 +10,6 @@ class Index:
 
     def __init__(self, table):
         # One index for each table. All our empty initially.
-        self.table = table
         self.indices = [None] *  table.num_columns
         for i in range(table.num_columns):
             self.create_index(i)
@@ -53,29 +49,6 @@ class Index:
 
     def create_index(self, column_number):
         self.indices[column_number] = BTree(B_TREE_DEGREE)
-        #edit
-        #select with index shouldnt be failing but here it looked like without this code it would replace old index w empty tree
-        #
-        for (col, rid), location in self.table.page_directory.items():
-            #just need one pass per record
-            if col != RID_COLUMN:
-                continue
-            
-            #since we only want base records make sure to skip the tail ones here
-            if location[1] >= MAX_BASE_PAGES:
-                continue
-
-            #latest value
-            values = self.table.get_values_by_rid(rid, [column_number], 0)
-            #check for any mising or deleted records
-            if not values:
-                continue
-            
-            value = values[0]
-            #makes sense cant just put [] into the index before inserting into the col index
-            if value is not None:
-                self.insert_record(rid, value, column_number)
-
 
     """
     # optional: Drop index of specific column
