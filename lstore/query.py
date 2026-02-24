@@ -105,7 +105,7 @@ class Query:
             vals = self.table.get_values_by_rid(rid, cols, 0)
             if vals == []:
                 continue
-
+            
             if search_key_index in cols:
                 key_val = vals[cols.index(search_key_index)]
             else:
@@ -113,6 +113,15 @@ class Query:
 
             if key_val != search_key:
                 continue
+            
+            
+            # if the column is 0 in projected columns, we put None
+            if len(vals) < len(projected_columns_index):
+                full_vals = [None] * self.table.num_columns
+                for i, col in enumerate(cols):
+                    full_vals[col] = vals[i]
+                vals = full_vals
+
             records.append(Record(rid, key_val, vals))
         return records
 
@@ -136,6 +145,12 @@ class Query:
             vals = self.table.get_values_by_rid(rid, cols, relative_version)
             if vals == []:
                 continue
+            # if the column is 0 in projected columns, we put None
+            if len(vals) < len(projected_columns_index):
+                full_vals = [None] * self.table.num_columns
+                for i, col in enumerate(cols):
+                    full_vals[col] = vals[i]
+                vals = full_vals
             records.append(Record(rid, vals[0], vals))
 
         return records
