@@ -160,7 +160,7 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
-        if columns[self.table.key] != None or columns[self.table.key] != 0 or columns[self.table.key] == '0' or columns[self.table.key] == 'None' or columns[self.table.key] == '' or columns[self.table.key] is not None:
+        if columns[self.table.key] is not None:
             return False
 
         return self.table.update_record(primary_key, columns)
