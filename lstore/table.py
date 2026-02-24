@@ -326,14 +326,14 @@ class Table:
                 #removed: page_range.tail_pages[last_tail_page][j].write(first_update[j]) #write record to the last tail page
            
             # add the mapping to the page directory
-            self.page_directory_lock.acquire()
-            for j in range(total_columns):
-                        # the page range index is the one our base record being updated is in
-                        # the page is the first available tail page, so the last one 
-                        # use the page offsets that were saved earlier 
-                        # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
-                page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, page_index, page_offsets[j]) #last_tail_page + MAX_BASE_PAGES
-            self.page_directory_lock.release()
+            # self.page_directory_lock.acquire()
+            # for j in range(total_columns):
+            #             # the page range index is the one our base record being updated is in
+            #             # the page is the first available tail page, so the last one 
+            #             # use the page offsets that were saved earlier 
+            #             # add MAX_BASE_PAGES offset to distinguish tail pages from base pages
+            #     page_directory[(j, first_update[RID_COLUMN])] = (page_range_index, page_index, page_offsets[j]) #last_tail_page + MAX_BASE_PAGES
+            # self.page_directory_lock.release()
 
         # change base record's schema encoding value
         #-> change to list from str for consistency        
@@ -428,7 +428,7 @@ class Table:
             next_record = read(INDIRECTION_COLUMN, record_to_delete) # save the next record down the pointer stream
             rid_value = read(RID_COLUMN, record_to_delete)
             
-            print(f"DELETE tail: rid={record_to_delete}, rid_value={rid_value}")
+            # print(f"DELETE tail: rid={record_to_delete}, rid_value={rid_value}")
             if rid_value > 0:
                 replace(record_to_delete, RID_COLUMN, -abs(rid_value)) # TODO
 
@@ -436,7 +436,7 @@ class Table:
             if next_record == baseRID: # if we reach base record
                 break
 
-        print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
+        # print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
         if baseRID > 0: 
             replace(baseRID, RID_COLUMN, -abs(baseRID)) # mark base record for death.
 
@@ -514,7 +514,10 @@ class Table:
         while (1):
             #print("MERGE START!!\n\n\n\n\n\n\n\n\n\n")
             try:
-                self.merge_queue.get(timeout=0.05) == None # if there is nothing to merge, skip this iteration of the loop and check again
+                 # if there is nothing to merge, skip this iteration of the loop and check again
+                batch_tail_records = self.merge_queue.get(timeout=0.05)
+                if batch_tail_records is None:
+                    continue
             except:
                 continue
             # print("merge is starting")
@@ -853,7 +856,7 @@ class Table:
             self.num_columns = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.key = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.RID_counter = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
-            print(f"Loaded RID_counter: {self.RID_counter}") # TODO
+            # print(f"Loaded RID_counter: {self.RID_counter}") # TODO
         
         # reconstruct num_columns-dependant variables
         self.total_columns = self.num_columns + METADATA_COLUMNS
