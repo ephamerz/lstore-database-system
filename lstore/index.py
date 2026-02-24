@@ -172,6 +172,10 @@ class BTree:
                     self.delete_sibling(x, i, i - 1)
                 else:
                     self.delete_merge(x, i, i - 1)
+                #edited to add to check if deleting issue
+                if i >= len(x.child):
+                    i = len(x.child) - 1
+                    
             self.delete(x.child[i], k)
 
     # Delete internal node
