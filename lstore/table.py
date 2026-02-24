@@ -426,11 +426,18 @@ class Table:
                 break
             next_record = read(INDIRECTION_COLUMN, record_to_delete) # save the next record down the pointer stream
             rid_value = read(RID_COLUMN, record_to_delete)
-            replace(record_to_delete, RID_COLUMN, rid_value * -1) # multiply by -1 to mark for deletion
+            
+            print(f"DELETE tail: rid={record_to_delete}, rid_value={rid_value}")
+            if rid_value > 0:
+                replace(record_to_delete, RID_COLUMN, -abs(rid_value)) # TODO
+
             record_to_delete = next_record # move onto the next record
             if next_record == baseRID: # if we reach base record
                 break
-        replace(baseRID, RID_COLUMN, -1) # mark base record for death.
+
+        print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
+        if baseRID > 0: 
+            replace(baseRID, RID_COLUMN, -abs(baseRID)) # mark base record for death.
 
         return True
 
@@ -493,7 +500,7 @@ class Table:
             return read_value.decode()
         if column_to_read == TIMESTAMP_COLUMN:
             return struct.unpack('<d', read_value)[0]
-        return int.from_bytes(read_value, byteorder='little')
+        return int.from_bytes(read_value, byteorder='little', signed = True)
 
     def getNewRID(self):
         RID = self.RID_counter
@@ -845,6 +852,7 @@ class Table:
             self.num_columns = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.key = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.RID_counter = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            print(f"Loaded RID_counter: {self.RID_counter}") # TODO
         
         # reconstruct num_columns-dependant variables
         self.total_columns = self.num_columns + METADATA_COLUMNS
