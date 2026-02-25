@@ -2,4 +2,4 @@ Dylan Hoang: 20%, Worked on merge logic, indexing, query correctness checks, and
 Amrutha Tummala: 20%, Implemented merge and TPS logic and contributed to debugging
 Nadia Bourne: 20%, Implemented database open() and close() functionality and wrote/debugged disk-related methods
 Ethan Pham: 20%, Implemented the disk manager and buffer pool and assisted with debugging
-Reshanna Chaudri: 20%, Integrated buffer pool and disk manager into the system and contributed to debugging and stabilization
+Risha Chaudri: 20%, Integrated buffer pool and disk manager into the system and contributed to debugging and stabilization
