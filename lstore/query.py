@@ -162,19 +162,17 @@ class Query:
             # initializing running total count for aggregation
             total = 0
 
-            #edit to call get_values_by_rid rather than processing all here to not fix the tail issues multiple places
             #this will get the newest value in the col for every record and add it to the total
             for i in rids:
                 #get the latest value for rid
                 values = self.table.get_values_by_rid(i, [aggregate_column_index], 0)
-                #if theres nothing there break out since its useless
-                '''
+
+                #checks here to catch any errors
+                if not isinstance(values, list):
+                    continue
                 if len(values) == 0:
                     continue
-                '''
-                #edited here
-                if not isinstance(values, list) or len(values) == 0:
-                    continue
+
                 #just want the aggregate_col value
                 target_value = values[0]
 
@@ -186,7 +184,6 @@ class Query:
         except:
             return False
        
-
 
     
     """
@@ -214,7 +211,7 @@ class Query:
                 primary_key = self.table.read(self.table.key + METADATA_COLUMNS, rid)  # +4 for metadata
                 # retrieve the value of aggregate column at requested relative version through rabbit hunt
                 value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
-                # add to total if valud value was returned
+                # add to total if valid value was returned
                 if value is not None:
                     total += value
 
