@@ -10,12 +10,18 @@ B_TREE_DEGREE = 100 # can be adjusted later, controls the amount of children a B
 
 class Index:
 
-    def __init__(self, table):
+    """
+    table: the table the index is associated to
+    indexed_cols: a LIST of the column indices in the table that are indexed
+    """
+    def __init__(self, table, indexed_cols):
         # One index for each table. All our empty initially.
         self.table = table
         self.indices = [None] *  table.num_columns
-        for i in range(table.num_columns):
-            self.create_index(i)
+        self.indexed_columns = []
+        #self.create_index(table.key) # only index the key column
+        for col in indexed_cols:
+            self.create_index(col)
 
     """
     # returns the location of all records with the given value on column "column"
@@ -51,7 +57,12 @@ class Index:
     """
 
     def create_index(self, column_number):
+        # do nothing if the index is already made
+        if self.indices[column_number] != None:
+            return
+        #print(f'creating index for column {column_number}')
         self.indices[column_number] = BTree(B_TREE_DEGREE)
+        self.indexed_columns.append(column_number)
         
         ##edit // this will rebuild column_number's index
         for (column, rid), location in self.table.page_directory.items():
@@ -80,7 +91,8 @@ class Index:
     """
 
     def drop_index(self, column_number):
-        pass
+        self.indices[column_number] = None
+        self.indexed_columns.remove(column_number)
 
     """
     # delete a record from a given column in the index

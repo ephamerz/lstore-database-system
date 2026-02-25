@@ -42,7 +42,7 @@ class Table:
         self.empty_schema = '0' * self.num_columns #replaces repeated '0' * self.num_cols during inserts
         self.page_directory = {} # key: column, RID --> value: page_range, page, page_offset
         self.page_ranges = []
-        self.index = Index(self)
+        self.index = Index(self, [key])
         self.bufferpool = bufferpool
         self.disk_manager = disk_manager
         self.merge_threshold_pages = 10  # The threshold to trigger a merge
@@ -157,7 +157,7 @@ class Table:
         values[RID_COLUMN] = rid
         values[TIMESTAMP_COLUMN] = time.time()
         values[SCHEMA_ENCODING_COLUMN] = empty_schema
-        values[BASE_RID_COLUMN] = None
+        values[BASE_RID_COLUMN] = rid
         values += columns
 
         #add so that buffer can use this
@@ -197,6 +197,8 @@ class Table:
         # -> for loop will take  O(n) time so longer needed, 
         #    since we just want to index primary key dont need the whole for loop so O(1) time
         for i in range(self.num_columns):
+            if self.index.indices[i] == None: # if this column is not indexed, do nothing
+                continue
             self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
 
         # add the mapping to the page directory
@@ -392,7 +394,8 @@ class Table:
         self.page_directory_lock.release()
 
         for i in range(self.num_columns):
-            if (values[i+METADATA_COLUMNS] != None):
+            # make sure it's a column that was actually being updated, and that the index exists in the first place
+            if (values[i+METADATA_COLUMNS] != None and self.index.indices[i] != None):
                 self.index.delete_record(old_baseRID, old_values[i], i)
                 self.index.insert_record(old_baseRID, values[i + METADATA_COLUMNS], i)
 
@@ -437,6 +440,9 @@ class Table:
 
         # need to remove from index
         for i in range(self.num_columns):
+            # if column i isn't indexed, skip this
+            if self.index.indices[i] == None:
+                continue
             value = read(i + METADATA_COLUMNS, baseRID)
             if value != None:
                 index.delete_record(baseRID, value, i)
@@ -793,10 +799,15 @@ class Table:
             f.write(struct.pack('<q', self.num_columns))
             f.write(struct.pack('<q', self.key))
             f.write(struct.pack('<q', self.RID_counter))
+
         
         # save page directory
         with open(os.path.join(path, 'page_directory.pkl'), 'wb') as f:
             pickle.dump(self.page_directory, f)
+
+        # save the indexed columns
+        with open(os.path.join(path, 'indexed_cols.pkl'), 'wb') as f:
+            pickle.dump(self.index.indexed_columns, f)
 
         for i, page_range in enumerate(self.page_ranges):
             page_range.save(os.path.join(path, f'page_range_{i}'))
@@ -816,6 +827,8 @@ class Table:
             self.num_columns = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.key = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
             self.RID_counter = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+
+
             # print(f"Loaded RID_counter: {self.RID_counter}") # TODO
         
         # reconstruct num_columns-dependant variables
@@ -825,6 +838,7 @@ class Table:
         # load page directory
         with open(os.path.join(path, 'page_directory.pkl'), 'rb') as f:
             self.page_directory = pickle.load(f)
+
 
         # reconstruct page_ranges so table code expecting this list still works
         # since we have the page directory, use this value so it stays 100% true
@@ -841,7 +855,10 @@ class Table:
             self.page_ranges.append(PageRange(self.total_columns))
 
         # reconstruct index from persisted records through page_directory-backed reads
-        self.index = Index(self)
+        # load the indexed columns and create the index
+        with open(os.path.join(path, 'indexed_cols.pkl'), 'rb') as f:
+            indexed_cols = pickle.load(f)
+            self.index = Index(self, indexed_cols)
 
         base_rids = []
         # get all valid base RIDS from page_directory (not those that are deleted)

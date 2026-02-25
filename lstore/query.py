@@ -1,6 +1,6 @@
 from lstore.table import Table, Record
 from lstore.index import Index
-from lstore.config import METADATA_COLUMNS
+from lstore.config import METADATA_COLUMNS, BASE_RID_COLUMN
 
 
 class Query:
@@ -54,46 +54,50 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
-        #introduce some sort of rab bit hunting through the tail records, 
-            # as well as checking what values we have gathered already
-        #rid key map
-        # get one RID
-        # get RID of base record, then access indirection and get tail record, 
-        #get specified column data we want
+        return self.select_version(search_key, search_key_index, projected_columns_index, 0)
+        # #introduce some sort of rab bit hunting through the tail records, 
+        #     # as well as checking what values we have gathered already
+        # #rid key map
+        # # get one RID
+        # # get RID of base record, then access indirection and get tail record, 
+        # #get specified column data we want
+        # records = []
+        # cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
 
-        rids = self.table.index.locate(search_key_index, search_key)
-        if len(rids) == 0:
-            return []
+        # # --- getting to this point means that the column is indexed ---
+        # rids = self.table.index.locate(search_key_index, search_key)
+        # if len(rids) == 0:
+        #     return []
         
         
-        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+        # #cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
 
-        #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
-        records = []
-        for rid in rids:
-            # get record(s) for the rid, projected cols, and version 0 
-            vals = self.table.get_values_by_rid(rid, cols, 0)
-            if vals == []:
-                continue
+        # #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
+        
+        # for rid in rids:
+        #     # get record(s) for the rid, projected cols, and version 0 
+        #     vals = self.table.get_values_by_rid(rid, cols, 0)
+        #     if vals == []:
+        #         continue
             
-            if search_key_index in cols:
-                key_val = vals[cols.index(search_key_index)]
-            else:
-                key_val = self.table.get_values_by_rid(rid, [search_key_index], 0)[0]
+        #     if search_key_index in cols:
+        #         key_val = vals[cols.index(search_key_index)]
+        #     else:
+        #         key_val = self.table.get_values_by_rid(rid, [search_key_index], 0)[0]
 
-            if key_val != search_key:
-                continue
+        #     if key_val != search_key:
+        #         continue
             
             
-            # if the column is 0 in projected columns, we put None
-            if len(vals) < len(projected_columns_index):
-                full_vals = [None] * self.table.num_columns
-                for i, col in enumerate(cols):
-                    full_vals[col] = vals[i]
-                vals = full_vals
+        #     # if the column is 0 in projected columns, we put None
+        #     if len(vals) < len(projected_columns_index):
+        #         full_vals = [None] * self.table.num_columns
+        #         for i, col in enumerate(cols):
+        #             full_vals[col] = vals[i]
+        #         vals = full_vals
 
-            records.append(Record(rid, key_val, vals))
-        return records
+        #     records.append(Record(rid, key_val, vals))
+        # return records
 
 
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
@@ -103,13 +107,38 @@ class Query:
         # get one RID
         # get RID of base record, then access indirection and get tail record, 
             # get specified column data we want
+        records = []
+        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
+
+        # check if the column is indexed. if not, we have to scan the table manually instead
+        if self.table.index.indices[search_key_index] == None:
+            for column, rid in self.table.page_directory:
+                # we only care about the column search_key_index
+                if column != search_key_index:
+                    continue
+                baseRID = self.table.read(BASE_RID_COLUMN, rid)
+                vals = self.table.get_values_by_rid(baseRID, cols, relative_version)
+                value = vals[search_key_index]
+                # if after manually scanning and reading it's actually the correct value we're searching by, then add it to the records list
+                if value == search_key:
+                    key_val = self.table.read(self.table.key, rid)
+                    if vals == []:
+                        continue
+                    # if the column is 0 in projected columns, we put None
+                    if len(vals) < len(projected_columns_index):
+                        full_vals = [None] * self.table.num_columns
+                        for i, col in enumerate(cols):
+                            full_vals[col] = vals[i]
+                        vals = full_vals
+                    records.append(Record(rid, key_val, vals))
+
+            return records
+
+        # --- if we get here then the column is indexed ---
         rids = self.table.index.locate(search_key_index, search_key)
         if len(rids) == 0:
             return []
-        
-        cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
 
-        records = []
         for rid in rids:
             # get record(s) for the rid, projected cols, and version 0 
             vals = self.table.get_values_by_rid(rid, cols, relative_version)
@@ -242,3 +271,6 @@ class Query:
             # returning and applying the updated columns
             return self.update(key, *updated_columns)
         return False
+    
+
+
