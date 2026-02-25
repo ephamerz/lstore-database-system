@@ -52,25 +52,26 @@ class Index:
 
     def create_index(self, column_number):
         self.indices[column_number] = BTree(B_TREE_DEGREE)
-        
-        ##edit // this will rebuild column_number's index
-        for (column, rid), location in self.table.page_directory.items():
-            #check only rid column for rid
-            if column != RID_COLUMN:
+        #edit
+        #select with index shouldnt be failing but here it looked like without this code it would replace old index w empty tree
+        #
+        for (col, rid), location in self.table.page_directory.items():
+            #just need one pass per record
+            if col != RID_COLUMN:
                 continue
             
-            #we only want base records so making sure to skip the tail ones
+            #since we only want base records make sure to skip the tail ones here
             if location[1] >= MAX_BASE_PAGES:
                 continue
 
             #latest value
-            column_values = self.table.get_values_by_rid(rid, [column_number], 0)
+            values = self.table.get_values_by_rid(rid, [column_number], 0)
             #check for any mising or deleted records
-            if not column_values:
+            if not values:
                 continue
             
-            value = column_values[0]
-            #only insert if value is valid
+            value = values[0]
+            #makes sense cant just put [] into the index before inserting into the col index
             if value is not None:
                 self.insert_record(rid, value, column_number)
 
@@ -196,9 +197,8 @@ class BTree:
                 if len(x.child[i - 1].keys) >= t:
                     self.delete_sibling(x, i, i - 1)
                 else:
-                    self.delete_merge(x, i, i - 1)              
-                #editing this to prevent out of range error 
-                    #  merge decreases the range so this has to also decrease
+                    self.delete_merge(x, i, i - 1)
+                #editing this to help prevent out of range child access during delete recursion?
                 if i >= len(x.child):
                     i = len(x.child) - 1
                     

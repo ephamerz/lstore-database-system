@@ -23,12 +23,14 @@ class Database():
     def open(self, path):
         self.path = path
         
+
         # create path if it doesn't exist
         os.makedirs(path, exist_ok=True)
 
         #since path is set now can initialize bufferpool disk_manager
         self.disk_manager = DiskManager(path)
         self.bufferpool = Bufferpool(self.disk_manager, capacity_pages = 32) #what num is capacity pages?
+
 
         metadata_path = os.path.join(path, 'db_metadata.pkl')
 
@@ -44,15 +46,18 @@ class Database():
                 #get the inputs needed
                 with open(os.path.join(table_path, 'table_metadata.bin'), 'rb') as f:
                     #dont want it to be dummy so include these
+                    #gives length of name so name knows how much to read and makes it into an int form for name
+                    #8 was used in table's save() so using it here
                     length_of_name = struct.unpack('<q', f.read(8))[0]
                     #decode bytes into string
                     name = f.read(length_of_name).decode('utf-8')
-                    
+                    #read as int
                     num_columns = struct.unpack('<q', f.read(8))[0]
+                    #read as int
                     key = struct.unpack('<q', f.read(8))[0]
 
                 #(not using just dummy Table since the Table needs real values and None caused it to error)
-                table = Table(name, num_columns, key, self.bufferpool, self.disk_manager) # include buffer and disk
+                table = Table(name, num_columns, key, self.bufferpool, self.disk_manager) # create dummy Table to call load() on // include buffer and disk
                 table.load(table_path)
                 self.tables[table_name] = table
 
