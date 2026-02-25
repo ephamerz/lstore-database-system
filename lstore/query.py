@@ -1,7 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
+from lstore.config import METADATA_COLUMNS
 
-LATEST_VERSION = 0
 
 class Query:
     """
@@ -22,25 +22,7 @@ class Query:
     # Return False if record doesn't exist or is locked due to 2PL
     """
     def delete(self, primary_key):
-        # #read a record
-        # #use index to locate rid
-        # rid = self.table.index.locate( self.table.key, primary_key)
         
-        # #if NA skip rest of the steps
-        # if rid == None:
-        #     return False
-
-        # try:
-        #     #address = self.table.page_directory[rid]
-        #     #delete address
-        #     del self.table.page_directory[rid]
-        #     #delete primary key
-        #     del self.table.index[primary_key]
-        #     return True
-        
-        # #if locked
-        # except: 
-        #     return False
         return self.table.delete_record(primary_key)
     
     
@@ -51,9 +33,6 @@ class Query:
     """
     def insert(self, *columns):
         # #variables
-        # schema_encoding = '0' * self.table.num_columns
-        # primary_key = columns[self.table.key]
-        # rid = len(self.table.page_directory)
         table = self.table
         index = table.index
         key_column = table.key
@@ -61,15 +40,6 @@ class Query:
         if len(RIDs) >= 1:
              return False
 
-        # try: 
-        #     #insert address to directory to get to the columns
-        #     self.table.page_directory[rid] = columns # tuple of column and RID
-        #     #insert for rid key mapping
-        #     self.table.index[primary_key] = rid
-        #     return True
-        
-        # except:
-        #     return False  
         return table.insert_new_record(columns)     
         
         
@@ -90,35 +60,40 @@ class Query:
         # get one RID
         # get RID of base record, then access indirection and get tail record, 
         #get specified column data we want
-        table = self.table
-        index = table.index
-        read = table.read
-        rids = index.locate(search_key_index, search_key)
+
+        rids = self.table.index.locate(search_key_index, search_key)
+        if len(rids) == 0:
+            return []
         
-        #no needed since select wont call key that DNE
-        #if len(rids) == 0:
-        #    return False
         
-        rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
-        base_schema = read(3, rid)
-        indirection_rid = read(0, rid)
-        tail_schema = None
-        if indirection_rid is not None and indirection_rid != 0:
-            tail_schema = read(3, indirection_rid)
 
-        vals = []
-        for col_idx in cols:
-            physical_col_idx = col_idx + 4
-            if base_schema[col_idx] == '0' or indirection_rid is None or indirection_rid == 0:
-                vals.append(read(physical_col_idx, rid))
+        #edit to just call get_values_by_rid cause fixing this in multiple places is a pain
+        records = []
+        for rid in rids:
+            # get record(s) for the rid, projected cols, and version 0 
+            vals = self.table.get_values_by_rid(rid, cols, 0)
+            if vals == []:
+                continue
+            
+            if search_key_index in cols:
+                key_val = vals[cols.index(search_key_index)]
             else:
-                if tail_schema is not None and tail_schema[col_idx] == '1':
-                    vals.append(read(physical_col_idx, indirection_rid))
-                else:
-                    vals.append(read(physical_col_idx, rid))
+                key_val = self.table.get_values_by_rid(rid, [search_key_index], 0)[0]
 
-        return [Record(rid, search_key, vals)]
+            if key_val != search_key:
+                continue
+            
+            
+            # if the column is 0 in projected columns, we put None
+            if len(vals) < len(projected_columns_index):
+                full_vals = [None] * self.table.num_columns
+                for i, col in enumerate(cols):
+                    full_vals[col] = vals[i]
+                vals = full_vals
+
+            records.append(Record(rid, key_val, vals))
+        return records
 
 
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
@@ -129,16 +104,28 @@ class Query:
         # get RID of base record, then access indirection and get tail record, 
             # get specified column data we want
         rids = self.table.index.locate(search_key_index, search_key)
+        if len(rids) == 0:
+            return []
         
-        #not needed since select will never call key that DNE
-        #if len(rids) == 0:
-        #    return False
-        
-        rid = rids[0]
         cols = [i for i, v in enumerate(projected_columns_index) if v == 1]
-        vals = self.table.get_values_by_rid(rid, cols, relative_version)  
 
-        return [Record(rid, search_key, vals)]
+        records = []
+        for rid in rids:
+            # get record(s) for the rid, projected cols, and version 0 
+            vals = self.table.get_values_by_rid(rid, cols, relative_version)
+            if vals == []:
+                continue
+            # if the column is 0 in projected columns, we put None
+            if len(vals) < len(projected_columns_index):
+                full_vals = [None] * self.table.num_columns
+                for i, col in enumerate(cols):
+                    full_vals[col] = vals[i]
+                vals = full_vals
+            records.append(Record(rid, vals[0], vals))
+
+        return records
+
+
 
 #############
 
@@ -150,35 +137,8 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
-        # # locating our record using the primary key, index to locate faster
-        # rid = self.table.index.locate(self.table.key, primary_key)
-
-        # # if the record doesn't exist, the update doesn't go through
-        # if rid is None:
-        #     return False
-        
-        # try:
-        #     # reading the current record directly
-        #     record = self.table.page_directory[rid]
-
-        #     # starting the new version as a copy of the most recent
-        #     new_record = list(record)
-
-        #     # updating column by column
-        #     for i in range(len(columns)):
-        #         if columns[i] is not None:
-        #             # to not change the primary key
-        #             if i == self.table.key and columns[i] != primary_key:
-        #                 return False
-        #             new_record[i] = columns[i]
-
-        #     # appending the newest version, but not overwriting the old ones
-        #     self.table.page_directory[rid] = tuple(new_record)
-
-        #     return True
-        # except:
-        #     return False
-        # pass
+        if columns[self.table.key] is not None:
+            return False
 
         return self.table.update_record(primary_key, columns)
 
@@ -198,43 +158,30 @@ class Query:
             # if no records, fails
             if len(rids) == 0:
                 return False
+                
             # initializing running total count for aggregation
             total = 0
-            physical_col_idx = aggregate_column_index + 4 # skipping first 4 metadata columns for column index
 
-            # processing each RID directly
-            for rid in rids:
-                # reading base schema to check if the column was ever updated
-                base_schema = self.table.read(3, rid) # 3 for SCHEMA_ENCODING_COLUMN
-                value = None    # placeholder value that is added by sum
-                # if column was never updated, read from base directly
-                if base_schema[aggregate_column_index] == '0':
-                    value = self.table.read(physical_col_idx, rid)
-                else:
-                    # column has updates, so check the tail
-                    indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
-                    # if there is no indirection pointer (0/none), no tail record exists --> go to base record
-                    if indirection_rid is None or indirection_rid == 0:
-                        value = self.table.read(physical_col_idx, rid)
-                    else:
-                        # tail record exists, check whether latest tail actually contains updated value for the column
-                        tail_schema = self.table.read(3, indirection_rid)
-                        # if tail schema bit is '1', tail holds latest value
-                        if tail_schema[aggregate_column_index] == '1':
-                            value = self.table.read(physical_col_idx, indirection_rid)
-                        else:
-                            # base should be the correct record then
-                            value = self.table.read(physical_col_idx, rid)
-                
-                # only add the value to the total if we successfully retrieve a value
-                if value is not None:
-                    total += value
+            #this will get the newest value in the col for every record and add it to the total
+            for i in rids:
+                #get the latest value for rid
+                values = self.table.get_values_by_rid(i, [aggregate_column_index], 0)
 
+                #checks here to catch any errors
+                if not isinstance(values, list) or len(values) == 0:
+                    continue
+
+                #just want the aggregate_col value
+                target_value = values[0]
+
+                # only add the value to the total if value is actually obtained//prevent a type error if there is a None value
+                if target_value != None:
+                    total += target_value
+            
             return total
         except:
             return False
        
-
 
     
     """
@@ -259,10 +206,10 @@ class Query:
             # for each base RID returned in the range
             for rid in rids:
                 # read primary key value directly from base
-                primary_key = self.table.read(self.table.key + 4, rid)  # +4 for metadata
+                primary_key = self.table.read(self.table.key + METADATA_COLUMNS, rid)  # +4 for metadata
                 # retrieve the value of aggregate column at requested relative version through rabbit hunt
                 value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid)
-                # add to total if valud value was returned
+                # add to total if valid value was returned
                 if value is not None:
                     total += value
 

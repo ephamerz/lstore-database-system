@@ -1,88 +1,90 @@
-import os
-from lstore.page import Page, CAPACITY
-
-"""
-DiskManager is needed to read and write pages to the disk. Each page is uniquely
-identified by its page_key: (table_name, page_range_index, is_tail, logical_page_index,
-column_index)
-"""
+import os                                 
+from lstore.page import Page            
+from lstore.config import CAPACITY      
 
 class DiskManager:
-    def __init__(self, db_path: str):
-        # here we initialize the DiskManager
-        # db_path is where all database files are going to be stored
-        self.db_path = db_path
+    '''
+    Deals with persistence; maps (table, range, tail, page, column) keys to physical binary file
+    '''
 
-        # make sure that the database root directory exists
+    def __init__(self, db_path: str):
+        self.db_path = db_path
         os.makedirs(self.db_path, exist_ok=True)
 
-    def _page_path(self, page_key):
-        # here we covert a page_key into a concrete file path on the disk
-        # page_key: (table_name, page_range_index, is_tail, logical_page_index, column_index)
+    def _get_path(self, page_key):
         table_name, page_range_index, is_tail, page_index, column_index = page_key
 
-        # directory for this table
-        table_dir = os.path.join(self.db_path, table_name)
+        table_directory = os.path.join(self.db_path, table_name)
 
-        # directory for this page range
-        page_range_dir = os.path.join(table_dir, f"pr_{page_range_index}")
+        range_directory = os.path.join(table_directory, f"page_range_{page_range_index}")
 
-        # create directories if they do not exist
-        os.makedirs(page_range_dir, exist_ok=True)
+        # creates directories if they DNE
+        if not os.path.exists(range_directory):
+            os.makedirs(range_directory, exist_ok=True)
 
-        # determine whether this is the base or tail page
         kind = "tail" if is_tail else "base"
+        return os.path.join(range_directory, f"{kind}_page_{page_index}_col_{column_index}.bin")
 
-        # creating the filename
-        filename = f"{kind}_p{page_index}_c{column_index}.bin"
+    # functions to convert integer to 8 bytes, and then reverse
+    def _int_to_8(self, x: int) -> bytes:
+        # have to convert an integer into exactly 8 bytes
+        return int(x).to_bytes(8, byteorder="little", signed=True)
+    def _int_from_8(self, b: bytes) -> int:
+        return int.from_bytes(b, byteorder="little", signed=True)
 
-        # return the full path to page file
-        return os.path.join(page_range_dir, filename)
-
+    # reading a page from disk and returning a page object
     def read_page(self, page_key):
-        # here we read a page from disk
-        # if the page file does not exist, return an empty page
-        # page_key is a unique identifier for the page
-        # resolving page file path
-        path = self._page_path(page_key)
-
-        # creating a new empty page object
+        path = self._get_path(page_key)
         page = Page()
 
-        # if the page does not exist on disk, return an empty page
-        if not os.path.exists(path):
+        if not os.path.exists(path):    # returning a blank page if one hasn't been created
             return page
-
-        # open the page file in binary
+        
+        # safe defaults
+        page.num_records = 0
+        page.page_size = 0
+        page.data = bytearray(CAPACITY)
+        
         with open(path, "rb") as f:
+            header = f.read(16)     # header has num_records (8 bytes) + page_size (8 bytes)
+            # if the file is too small, make as empty page
+            if len(header) < 16:
+                data = f.read(CAPACITY)
+                page.data[:] = data.ljust(CAPACITY, b"\x00")[:CAPACITY]
+                return page
+
+            page.num_records = self._int_from_8(header[0:8])
+            page.page_size = self._int_from_8(header[8:16])
+
+
             data = f.read(CAPACITY)
 
-        # making sure the page has same # bytes as CAPACITY
-        if len(data) < CAPACITY:
-            # zero bytes for if the file is too small
-            data = data + bytes(CAPACITY - len(data))
-        elif len(data) > CAPACITY:
-            # truncate if the file is too large (just as a safety feature)
-            data = data[:CAPACITY]
+        # making sure data is exactly CAPACITY bytes
+        data = data.ljust(CAPACITY, b"\x00")[:CAPACITY]
 
-        # loading raw bytes into page object
         page.data[:] = data
 
-        # note that page.page_size is not restored yet
-        # this is currently safe for reads and replaces
-        # we'll fix this later on when inserts go through the bufferpool
-        page.page_size = 0
+        if page.num_records < 0:
+            page.num_records = 0
+        if page.page_size < 0:
+            page.page_size = 0
+        if page.page_size > CAPACITY:
+            page.page_size = CAPACITY
 
         return page
 
+    # write a page object to disk to overwrite any other file
     def write_page(self, page_key, page: Page):
-        # this writes a page to disk, overwriting existing page files
-        # page_key is unique identifier for the page
-        # page is page object containing the data to write
-        # Resolve page file path
-        path = self._page_path(page_key)
+        path = self._get_path(page_key)
 
-        # Open file in binary write mode (creates or overwrites)
+        data = bytes(page.data)
+
+        data = data.ljust(CAPACITY, b"\x00")[:CAPACITY]
+
+        header = self._int_to_8(page.num_records) + self._int_to_8(page.page_size)
+
         with open(path, "wb") as f:
-            # Write exactly CAPACITY bytes
-            f.write(page.data)
+            # metadata first
+            f.write(header)
+            # page data after
+            f.write(data)

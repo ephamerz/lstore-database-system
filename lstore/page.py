@@ -1,10 +1,8 @@
 # from lstore.table import Record
 import struct
+import os
+from lstore.config import CAPACITY, METADATA_COLUMNS, MAX_BASE_PAGES, ENTRY_SIZE
 
-CAPACITY = 4096
-MANDATORY_COLUMNS = 4
-MAX_BASE_PAGES = 16
-ENTRY_SIZE = 8 # 8 bytes
 
 class Page:
 
@@ -38,6 +36,9 @@ class Page:
             return True
         return False
     
+    def readWholePage(self):
+        return self.data
+    
     def read(self, lower_index):
         upper_index = lower_index + ENTRY_SIZE
         # this should always pass since we don't write unless we have the full capacity needed, but just in case
@@ -63,7 +64,12 @@ class Page:
         
         self.data[index:index+ENTRY_SIZE] = value_bytes
 
-        
+    """
+    Saves page to disk.
+
+    param path: string     #Path to save page to
+    """
+
 class PageRange:
 
     def __init__(self, num_columns): # initialize 16 base pages indexed at 0
@@ -71,6 +77,7 @@ class PageRange:
         self.basePageToWrite = 0 # a variable that keeps count of the current base page we should write to, I feel like this implementation might need to be revisited when deletion comes along - DH
 
         self.base_pages = []
+        self.tps = [0] * MAX_BASE_PAGES # one tps value for every base page
         for base_page in range(MAX_BASE_PAGES): # make 16 base pages
             self.base_pages.append([])
             for page in range(0, (self.num_columns)): 
@@ -88,3 +95,31 @@ class PageRange:
     def insert_to_tail_page(self):
         #reminder to possibly implement if we decide to do so
         pass
+
+    def updateTPS(self, new_TPS_value, base_page_index):
+        self.tps[base_page_index] = new_TPS_value
+
+
+    """
+    Saves page range to disk.
+
+    param path: string     #Path to save page range to
+    """
+    def save(self, path):
+        os.makedirs(path, exist_ok=True) # create path if it doesn't exist
+
+        with open(os.path.join(path, 'page_range_metadata.bin'), 'wb') as f:
+            f.write(struct.pack('<q', self.basePageToWrite))
+            f.write(struct.pack('<q', len(self.tail_pages)))
+    
+    """
+    Loads page range from disk.
+
+    param path: string     #Path to load page range from
+    """
+    def load(self, path, table):
+
+        # load metadata
+        with open(os.path.join(path, 'page_range_metadata.bin'), 'rb') as f:
+            self.basePageToWrite = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
+            num_tail_pages = struct.unpack('<q', f.read(ENTRY_SIZE))[0]
