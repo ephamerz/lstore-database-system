@@ -4,15 +4,27 @@ from lstore.disk_manager import DiskManager
 import os
 import struct
 import pickle
+import tempfile
 
 class Database():
 
     def __init__(self):
         self.tables = {} # dictionary for faster lookup
         self.path = None
+        self._auto_opened = False
 
         self.bufferpool = None
         self.disk_manager = None
+
+    def ensure_file_initialized(self):
+        if self.bufferpool is not None and self.disk_manager is not None:
+            return
+
+        
+        self.path = tempfile.mkdtemp(prefix="default_db")
+        self.disk_manager = DiskManager(self.path)
+        self.bufferpool = Bufferpool(self.disk_manager, capacity_pages=32)
+        self._auto_opened = True
 
     """
     Load a database (all tables) from disk. If the database does not exist, create a new one.
@@ -22,6 +34,7 @@ class Database():
     """
     def open(self, path):
         self.path = path
+        self._auto_opened = False
         
         # create path if it doesn't exist
         os.makedirs(path, exist_ok=True)
@@ -86,6 +99,9 @@ class Database():
     :param key_index: int             #Index of table key in columns
     """
     def create_table(self, name, num_columns, key_index):
+        if self.bufferpool is None or self.disk_manager is None:
+            self.ensure_file_initialized()
+
         # Prevent duplicate table names 
         if self.get_table(name) is not None:
             print(f"dupe table name: '{name}' already exists")
