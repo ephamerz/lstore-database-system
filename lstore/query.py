@@ -22,25 +22,7 @@ class Query:
     # Return False if record doesn't exist or is locked due to 2PL
     """
     def delete(self, primary_key):
-        # #read a record
-        # #use index to locate rid
-        # rid = self.table.index.locate( self.table.key, primary_key)
         
-        # #if NA skip rest of the steps
-        # if rid == None:
-        #     return False
-
-        # try:
-        #     #address = self.table.page_directory[rid]
-        #     #delete address
-        #     del self.table.page_directory[rid]
-        #     #delete primary key
-        #     del self.table.index[primary_key]
-        #     return True
-        
-        # #if locked
-        # except: 
-        #     return False
         return self.table.delete_record(primary_key)
     
     
@@ -51,9 +33,6 @@ class Query:
     """
     def insert(self, *columns):
         # #variables
-        # schema_encoding = '0' * self.table.num_columns
-        # primary_key = columns[self.table.key]
-        # rid = len(self.table.page_directory)
         table = self.table
         index = table.index
         key_column = table.key
@@ -61,15 +40,6 @@ class Query:
         if len(RIDs) >= 1:
              return False
 
-        # try: 
-        #     #insert address to directory to get to the columns
-        #     self.table.page_directory[rid] = columns # tuple of column and RID
-        #     #insert for rid key mapping
-        #     self.table.index[primary_key] = rid
-        #     return True
-        
-        # except:
-        #     return False  
         return table.insert_new_record(columns)     
         
         
@@ -211,37 +181,7 @@ class Query:
                 # only add the value to the total if value is actually obtained//prevent a type error if there is a None value
                 if target_value != None:
                     total += target_value
-            '''
-            physical_col_idx = aggregate_column_index + METADATA_COLUMNS # skipping first 4 metadata columns for column index
-
-            # processing each RID directly
-            for rid in rids:
-                # reading base schema to check if the column was ever updated
-                base_schema = self.table.read(3, rid) # 3 for SCHEMA_ENCODING_COLUMN
-                value = None    # placeholder value that is added by sum
-                # if column was never updated, read from base directly
-                if base_schema[aggregate_column_index] == '0':
-                    value = self.table.read(physical_col_idx, rid)
-                else:
-                    # column has updates, so check the tail
-                    indirection_rid = self.table.read(0, rid)   # for INDIRECTION_COLUMN
-                    # if there is no indirection pointer (0/none), no tail record exists --> go to base record
-                    if indirection_rid is None or indirection_rid == 0:
-                        value = self.table.read(physical_col_idx, rid)
-                    else:
-                        # tail record exists, check whether latest tail actually contains updated value for the column
-                        tail_schema = self.table.read(3, indirection_rid)
-                        # if tail schema bit is '1', tail holds latest value
-                        if tail_schema[aggregate_column_index] == '1':
-                            value = self.table.read(physical_col_idx, indirection_rid)
-                        else:
-                            # base should be the correct record then
-                            value = self.table.read(physical_col_idx, rid)
-                
-                # only add the value to the total if we successfully retrieve a value
-                if value is not None:
-                    total += value
-            '''
+            
             return total
         except:
             return False

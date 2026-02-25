@@ -192,8 +192,7 @@ class Table:
         page_offsets = [None] * total_columns # save the page offsets for each column for later
 
         for i in range(total_columns):
-        #    page_offsets[i] = base_pages[base_idx][i].page_size
-        #    base_pages[base_idx][i].write(values[i])
+        
         #change so that it goes through helper to deal with the pinning and marking instead of using .write
             page_offsets[i] = self._write_page(page_range_index, base_idx, i, values[i])
 
@@ -201,8 +200,6 @@ class Table:
         # ----------------------------------------------------------------------
 
         # add the values to the index. for now just index the primary key
-        #for i in range(self.num_columns):
-        #    self.index.insert_record(values[RID_COLUMN], values[i + METADATA_COLUMNS], i)
         # -> for loop will take  O(n) time so longer needed, 
         #    since we just want to index primary key dont need the whole for loop so O(1) time
         for i in range(self.num_columns):
@@ -387,7 +384,6 @@ class Table:
             #removed: page_range.tail_pages[last_tail_page][i].write(values[i]) #write record to the last tail page       
         
         # add the values to the index. for now just index the primary key, no secondary keys right now
-        # self.index.insert_record(values[RID_COLUMN], values[self.key], self.key)
 
         # add the mapping to the page directory
         #print('lock acquire')
@@ -406,7 +402,6 @@ class Table:
             if (values[i+METADATA_COLUMNS] != None):
                 self.index.delete_record(old_baseRID, old_values[i], i)
                 self.index.insert_record(old_baseRID, values[i + METADATA_COLUMNS], i)
-        #print('lock released')
 
         #------------------------------------
         # add to merge
@@ -437,7 +432,6 @@ class Table:
             next_record = read(INDIRECTION_COLUMN, record_to_delete) # save the next record down the pointer stream
             rid_value = read(RID_COLUMN, record_to_delete)
             
-            # print(f"DELETE tail: rid={record_to_delete}, rid_value={rid_value}")
             if rid_value > 0:
                 replace(record_to_delete, RID_COLUMN, -abs(rid_value)) # TODO
 
@@ -445,14 +439,12 @@ class Table:
             if next_record == baseRID: # if we reach base record
                 break
 
-        # #print(f"DELETE base: rid={baseRID}, baseRID value={baseRID}")
         if baseRID > 0: 
             replace(baseRID, RID_COLUMN, -abs(baseRID)) # mark base record for death.
 
         # need to remove from index
         for i in range(self.num_columns):
             #could be wrong so swapping out for now
-            #index.delete_record(baseRID, read(i , baseRID), i)
         #editing this to fix delete index clean up by not reading metadata cols for i
             value = read(i + METADATA_COLUMNS, baseRID)
             if value is not None:
@@ -477,14 +469,6 @@ class Table:
         page_index = location[1]
         page_offset = location[2]
         
-       #page_range = self.page_ranges[page_range_index]
-        # Check if this is a base page (page_index < MAX_BASE_PAGES) or tail page
-        #if page_index < MAX_BASE_PAGES:
-        #    page_range.base_pages[page_index][column_for_replace].replace(value, page_offset)
-        #else:
-            # For tail pages, need to adjust the index
-         #   tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
-        #    page_range.tail_pages[tail_page_index][column_for_replace].replace(value, page_offset)
         
         #replace above with helper so buffer involved// base or tail done w page_key var is_tail 
         self._update_page(page_range_index,page_index, column_for_replace, value, page_offset)
@@ -508,11 +492,7 @@ class Table:
         page_index = location[1]
         page_offset = location[2]
         
-        #if page_index < MAX_BASE_PAGES:
-        #    read_value = page_range.base_pages[page_index][column_to_read].read(page_offset)
-        #else:
-        #    tail_page_index = page_index - MAX_BASE_PAGES #if page_index >= MAX_BASE_PAGES else page_index//repetitive
-        #    read_value = page_range.tail_pages[tail_page_index][column_to_read].read(page_offset)
+        
         self.page_directory_lock.release()
         #isntead of above commened out code, route w helper so buffer funcs included
         read_value = self._read_page(page_range_index, page_index, column_to_read, page_offset)
@@ -593,9 +573,6 @@ class Table:
                 page_range = self.page_ranges[page_range_index] 
                 
                 #swaps directly so changing it to use helper for buffer
-                #old_base_page = page_range.base_pages[page_index]
-                #self.deallocation_queue.put(old_base_page)
-                #page_range.base_pages[page_index] = new_base_page
 
                 
                 TPS = -1 # TPS can't be negative, this makes it a minimum always
@@ -648,12 +625,6 @@ class Table:
 
             # Add the base page to the set, using INDIRECTION for placeholder
 
-        #     location = self.page_directory.get((column_for_replace, RID))
-        # page_range_index = location[0]
-        # page_index = location[1]
-        # page_offset = location[2]
-        
-        # page_range = self.page_ranges[page_range_index]
 
             self.page_directory_lock.acquire()
             location = self.page_directory.get((RID_COLUMN, base_RID))
@@ -906,12 +877,7 @@ class Table:
                 base_rids.append(rid) 
 
         # # for EVERY SINGLE RID and column insert into indexes
-        # for rid in base_rids:
-        #     # for every user column
-        #     for column in range(self.num_columns):
-        #         value = self.read(column + METADATA_COLUMNS, rid)
-        #         if value is not None:
-        #             self.index.insert_record(rid, value, column)
+       
         i = 0
         while os.path.exists(os.path.join(path, f'page_range_{i}')):
             page_range = PageRange(self.total_columns)
