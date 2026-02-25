@@ -168,9 +168,7 @@ class Query:
                 values = self.table.get_values_by_rid(i, [aggregate_column_index], 0)
 
                 #checks here to catch any errors
-                if not isinstance(values, list):
-                    continue
-                if len(values) == 0:
+                if not isinstance(values, list) or len(values) == 0:
                     continue
 
                 #just want the aggregate_col value
