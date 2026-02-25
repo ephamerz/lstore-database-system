@@ -78,15 +78,14 @@ class Table:
             page_index = table_page_index - MAX_BASE_PAGES
         else:
             page_index = table_page_index
-        #return page_key
+
         return (self.name, page_range_index, is_tail, page_index, column_index)
 
 
-    #uses parameters to find  where to access and gets the page object for that location
+    #uses parameters to find where to access and gets the page object for that location
     def _get_page(self, page_range_index, page_index, column_index):
         #gets page_key from table in the tuple format w helper
         page_key = self._page_key(page_range_index, page_index, column_index)
-        #return page and page_key since it will help simplify code for managing dirty and unpinning
         return self.bufferpool.get_page(page_key), page_key
 
 
@@ -99,13 +98,11 @@ class Table:
         value = page.read(page_offset)
         #dont need page anymore so unpin
         self.bufferpool.unpin(page_key)
-        #return the cell value from the page
         return value
 
 
     #write/append in a page and return the page_offset so the page_directory knows where to find it
     def _write_page(self, page_range_index, page_index, column_index, value):
-        #will do pinning through this route(w get_page) and get the page we are checking
         page, page_key = self._get_page(page_range_index, page_index, column_index)
         #current size before the append to know where to access after
         page_offset = page.page_size
@@ -115,13 +112,11 @@ class Table:
         #since updated need to mark dirty now and then unpin:
         self.bufferpool.mark_dirty(page_key)
         self.bufferpool.unpin(page_key)
-        #for page_directory since it needs the start position of value in order to find it
         return page_offset
 
 
     #deals with updating a page for the update_record so it goes through buffer and does the needed pinning and marking dirty
     def _update_page(self, page_range_index, page_index, column_index, value, page_offset):
-        #will do pinning through this route(w get_page) and get the page we are checking
         page, page_key = self._get_page(page_range_index, page_index, column_index)
         #go to page_offset in the targetted page and update the old value with this new one
         page.replace(value, page_offset)
@@ -134,7 +129,6 @@ class Table:
     #whening checking has_capacity it goes through page which is now supposed to be dealt w buffer 
         # so adding this to make it know that a page is being accessed and pinning and unpinning accordingly
     def _has_capacity(self, page_range_index, page_index, column_index, size):
-        #will do pinning through this route(w get_page) and get the page we are checking
         page, page_key = self._get_page(page_range_index, page_index, column_index)
         #returns a boolean that will be true if there is capacity and false if there isnt
         capacity = page.has_capacity(size)
@@ -344,7 +338,6 @@ class Table:
         replace(baseRID, SCHEMA_ENCODING_COLUMN, ''.join(base_schema_encoding))
 
 
-
         # ready the tail record with new values 
         values += columns
         #---- adding actual update ----------------------------
@@ -444,13 +437,10 @@ class Table:
 
         # need to remove from index
         for i in range(self.num_columns):
-            #could be wrong so swapping out for now
-        #editing this to fix delete index clean up by not reading metadata cols for i
             value = read(i + METADATA_COLUMNS, baseRID)
-            if value is not None:
+            if value != None:
                 index.delete_record(baseRID, value, i)
                 
-
         # needd to remove from page directory
         self.page_directory_lock.acquire()
         for i in range(self.total_columns):
@@ -469,7 +459,6 @@ class Table:
         page_index = location[1]
         page_offset = location[2]
         
-        
         #replace above with helper so buffer involved// base or tail done w page_key var is_tail 
         self._update_page(page_range_index,page_index, column_for_replace, value, page_offset)
 
@@ -482,7 +471,6 @@ class Table:
 
         page_directory = self.page_directory
         location = page_directory.get((column_to_read, RID))
-
         
         if location == None:
             self.page_directory_lock.release()
@@ -492,9 +480,8 @@ class Table:
         page_index = location[1]
         page_offset = location[2]
         
-        
         self.page_directory_lock.release()
-        #isntead of above commened out code, route w helper so buffer funcs included
+        #route w helper so buffer funcs included
         read_value = self._read_page(page_range_index, page_index, column_to_read, page_offset)
 
         #if it isnt there just return now
@@ -530,10 +517,6 @@ class Table:
             self.merge_set = []
             self.merge_set_lock.release()
             batch_cons_page = self.getBasePageCopy(batch_tail_records) # this is 2D ARRAY base pages have MANY pages
-
-            # for i in range(len(batch_cons_page)):
-            #     self.decompress_page(batch_cons_page[i])
-                
 
             seenUpdates = {}
 
@@ -574,7 +557,7 @@ class Table:
                 
                 #swaps directly so changing it to use helper for buffer
 
-                
+
                 TPS = -1 # TPS can't be negative, this makes it a minimum always
 
                 #merges the col values to base going through buffer
@@ -588,7 +571,6 @@ class Table:
 
                     write_val = newest_value[0]
                     tempTPS = newest_value[1]
-
 
                     #where to store newest_value in page_directory
                     value_location = self.page_directory.get((i, base_RID_to_update))
@@ -625,7 +607,6 @@ class Table:
 
             # Add the base page to the set, using INDIRECTION for placeholder
 
-
             self.page_directory_lock.acquire()
             location = self.page_directory.get((RID_COLUMN, base_RID))
             self.page_directory_lock.release()
@@ -658,9 +639,6 @@ class Table:
             except Exception:
                 #if _get_page fails, continue to next record without crashing
                 continue
-
-
-
 
         return base_page_copy
         
@@ -732,13 +710,7 @@ class Table:
     # @:param col_indices: list of user column indicies
     # @:param relative_version: 0 for latest, (-) for previous versions
     def get_values_by_rid(self, rid, col_indices, relative_version):
-        """
-        Efficiently retrieves multiple column values for any RID.
 
-        :param rid: the base RID of the record
-        :param col_indices: list of user column indicies
-        :param relative_version: 0 for latest, (-) for previous versions
-        """
         result =[]  # list of values in same order as col_indices
         read = self.read
 
@@ -771,11 +743,12 @@ class Table:
                 if indirection_rid is None or indirection_rid == 0: #elif it if
                     # schema is updated but no tail exists, so read from base
                     result.append(read(physical_col_idx, rid))
-                    continue #edit
+                    continue
 
                 latest_value = None
                 current = indirection_rid
 
+                #find the latest tail
                 while current != None and current != 0 and current != rid:
                     tail_schema = read(SCHEMA_ENCODING_COLUMN, current)
                     if tail_schema == None:
