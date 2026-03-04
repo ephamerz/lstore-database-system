@@ -62,6 +62,27 @@ class Table:
         thread.start()
 
 
+
+    #helper func for transaction to get original records for update and delete by storing it with primary key:
+    def _abort(self, primary):
+        #get the rid for the latest record
+        RIDs = self.index.locate(self.key, primary)
+
+        #safety check // record does not exist
+        if len(RIDs) == 0:
+            return None 
+        
+        baseRID = RIDs[0]
+
+        #get latest column so i can use get_values_by_rid to get the latest record
+        latest_column = list(range(self.num_columns))
+        latest_record = self.get_values_by_rid(baseRID, latest_column, 0)
+
+        #return what is stored inside the record
+        return latest_record
+
+
+
     #helper funcs for integrating buffer and disk into table:
 
     #tuple format used in bufferpool and disk manager so convert table info to it
