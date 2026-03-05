@@ -41,10 +41,19 @@ class LockManager:
             return True
 
     """
-    Call from Transaction.Release all locks for the given transaction.
+    Call from Transaction. Release all locks for the given transaction.
 
     :param transaction_id: int
     """
     def release_all(self, transaction_id):
-        
-        pass
+        with self.lock:
+            # find every record this transaction holds a lock on
+            keys_to_clean = [
+                key for key, entry in self.lock_dict.items()
+                if transaction_id in entry['holders']
+            ]
+            for key in keys_to_clean:
+                self.lock_dict[key]['holders'].discard(transaction_id)
+                # clean up empty entries
+                if not self.lock_dict[key]['holders']:
+                    del self.lock_dict[key]
