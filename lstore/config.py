@@ -9,3 +9,5 @@ METADATA_COLUMNS = 5 # indirection, rid, time, schema, baserid
 ENTRY_SIZE = 8 # 8 bytes
 CAPACITY = 4096
 MAX_BASE_PAGES = 16
+SHARED = 0 # lock value for shared lock
+EXCLUSIVE = 1 # lock value for exclusive lock
