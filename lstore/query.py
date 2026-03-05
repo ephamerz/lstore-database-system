@@ -1,6 +1,6 @@
 from lstore.table import Table, Record
 from lstore.index import Index
-from lstore.config import METADATA_COLUMNS, BASE_RID_COLUMN
+from lstore.config import METADATA_COLUMNS, BASE_RID_COLUMN, SHARED, EXCLUSIVE
 
 
 class Query:
