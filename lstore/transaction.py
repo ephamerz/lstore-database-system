@@ -3,6 +3,7 @@ from lstore.index import Index
 import threading
 
 _transaction_counter = 0
+_counter_lock = threading.Lock()
 
 class Transaction:
 
@@ -16,8 +17,9 @@ class Transaction:
 
         # lock_manager needs a unique transaction ID to track locks per transaction
         global _transaction_counter
-        self.transaction_id = _transaction_counter
-        _transaction_counter += 1
+        with _counter_lock:
+            self.transaction_id = _transaction_counter
+            _transaction_counter += 1
 
         pass
 
