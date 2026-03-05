@@ -2,6 +2,8 @@ from lstore.table import Table, Record
 from lstore.index import Index
 import threading
 
+_transaction_counter = 0
+
 class Transaction:
 
     """
@@ -11,6 +13,12 @@ class Transaction:
         self.queries = []
         #this list will contain all the changes/writes that occured(no select or sum) so abort can retrieve original record
         self.changes = []
+
+        # lock_manager needs a unique transaction ID to track locks per transaction
+        global _transaction_counter
+        self.transaction_id = _transaction_counter
+        _transaction_counter += 1
+
         pass
 
 
