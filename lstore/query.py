@@ -20,7 +20,9 @@ class Query:
         table = self.table
         indexed_cols = table.index.indexed_columns
         for col in indexed_cols:
-            lock_manager.acquire(transaction_id, table.name, col, lock_type, INDEX)
+            acquired = lock_manager.acquire(transaction_id, table.name, col, lock_type, INDEX)
+            if not acquired:
+                return False
 
     """
     # internal Method
@@ -39,7 +41,9 @@ class Query:
             return False
         
         # lock record
-        lock_manager.acquire(transaction_id, table.name, RIDs[0], EXCLUSIVE, RECORD)
+        acquired = lock_manager.acquire(transaction_id, table.name, RIDs[0], EXCLUSIVE, RECORD)
+        if not acquired:
+            return False
 
         return table.delete_record(primary_key)
     
@@ -57,14 +61,15 @@ class Query:
         lock_manager = self.lock_manager
         rid = table.getNewRID()
 
-       
         # lock indexes
         self.lock_indexes(transaction_id, EXCLUSIVE)
         RIDs = index.locate(key_column, columns[key_column]) 
         if len(RIDs) >= 1:
             return False
         # lock the record
-        lock_manager.acquire(transaction_id, table.name, rid, EXCLUSIVE, RECORD)
+        acquired = lock_manager.acquire(transaction_id, table.name, rid, EXCLUSIVE, RECORD)
+        if not acquired:
+            return False
 
         return table.insert_new_record(columns, rid)     
         
@@ -96,20 +101,27 @@ class Query:
 
     
         # lock only search key index
-        lock_manager.acquire(transaction_id, table.name, search_key_index, SHARED, INDEX)
+        acquired = lock_manager.acquire(transaction_id, table.name, search_key_index, SHARED, INDEX)
+        if not acquired:
+            return False
 
         # check if the column is indexed. if not, we have to scan the table manually instead
         if self.table.index.indices[search_key_index] == None:
+            table.page_directory_lock.acquire()
             for column, rid in self.table.page_directory:
                 # we only care about the column search_key_index
                 if column != search_key_index:
                     continue
                 
                 # get a shared lock on the rid
-                lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+                acquired = lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+                if not acquired:
+                    return False
 
                 baseRID = self.table.read(BASE_RID_COLUMN, rid)
                 vals = self.table.get_values_by_rid(baseRID, cols, relative_version, transaction_id=transaction_id)
+                if vals == False: # got blocked by a lock
+                    return False
                 value = vals[search_key_index]
                 # if after manually scanning and reading it's actually the correct value we're searching by, then add it to the records list
                 if value == search_key:
@@ -123,7 +135,7 @@ class Query:
                             full_vals[col] = vals[i]
                         vals = full_vals
                     records.append(Record(rid, key_val, vals))
-
+            table.page_directory_lock.release()
             return records
 
         # --- if we get here then the column is indexed ---
@@ -133,10 +145,14 @@ class Query:
 
         for rid in rids:
             # get a shared lock on the rid
-            lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+            acquired = lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+            if not acquired:
+                return False
 
             # get record(s) for the rid, projected cols, and version 0 
             vals = self.table.get_values_by_rid(rid, cols, relative_version, transaction_id=transaction_id)
+            if vals == False:
+                return False # got blocked by a lock
             if vals == []:
                 continue
             # if the column is 0 in projected columns, we put None
@@ -175,7 +191,9 @@ class Query:
             return False
         rid = RIDs[0]
         # lock the record
-        lock_manager.acquire(transaction_id, table.name, rid, EXCLUSIVE, RECORD)
+        acquired = lock_manager.acquire(transaction_id, table.name, rid, EXCLUSIVE, RECORD)
+        if not acquired:
+            return False
 
         return self.table.update_record(primary_key, columns)
 
@@ -242,7 +260,9 @@ class Query:
         lock_manager = self.lock_manager
         table = self.table
         # lock primary key index
-        lock_manager.acquire(transaction_id, table.name, table.key, SHARED, INDEX)
+        acquired = lock_manager.acquire(transaction_id, table.name, table.key, SHARED, INDEX)
+        if not acquired:
+            return False
         try:
             # use the table's index to find all base RIDs with primary key in the range
             rids = self.table.index.locate_range(start_range, end_range, self.table.key)
@@ -255,13 +275,17 @@ class Query:
             # for each base RID returned in the range
             for rid in rids:
                 # lock rid
-                lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+                acquired = lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
+                if not acquired:
+                    return False
 
                 # read primary key value directly from base
                 primary_key = self.table.read(self.table.key + METADATA_COLUMNS, rid)  # +4 for metadata
                 # retrieve the value of aggregate column at requested relative version through rabbit hunt
                 # no need to lock any records for this part, all the shared locks will be acquired in rabbit_hunt
                 value = self.table.rabbit_hunt(aggregate_column_index, primary_key, relative_version, base_rid = rid, transaction_id=transaction_id)
+                if value == False:
+                    return False # got blocked by a lock
                 # add to total if valid value was returned
                 if value is not None:
                     total += value

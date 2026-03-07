@@ -68,7 +68,12 @@ class Table:
 
     #helper func for transaction to get original records for update and delete by storing it with primary key:
     def _abort(self, primary, transaction_id=None):
+
         #get the rid for the latest record
+        lock_manager = self.lock_manager
+        acquired = lock_manager.acquire(transaction_id, self.name, self.key, SHARED, INDEX)
+        if not acquired:
+            return False
         RIDs = self.index.locate(self.key, primary)
 
         #safety check // record does not exist
@@ -690,7 +695,9 @@ class Table:
     def rabbit_hunt(self, col_idx, primary_key, version_num, base_rid = None, transaction_id = None):
         lock_manager = self.lock_manager
         # get a shared lock on the rid
-        lock_manager.acquire(transaction_id, self.name, base_rid, SHARED, RECORD)
+        acquired = lock_manager.acquire(transaction_id, self.name, base_rid, SHARED, RECORD)
+        if not acquired:
+            return False
 
         version_num *= 1
 
@@ -706,7 +713,9 @@ class Table:
             baseRID = base_rid
 
         # get a shared lock on the rid
-        lock_manager.acquire(transaction_id, self.name, baseRID, SHARED, RECORD)
+        acquired = lock_manager.acquire(transaction_id, self.name, baseRID, SHARED, RECORD)
+        if not acquired:
+            return False
 
         # check base record's schema encoding to see if columns were ever updated
         base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
@@ -722,7 +731,9 @@ class Table:
         count = 0
         while baseRID != indirection_RID:
             # get a shared lock on the rid
-            lock_manager.acquire(transaction_id, self.name, indirection_RID, SHARED, RECORD)
+            acquired = lock_manager.acquire(transaction_id, self.name, indirection_RID, SHARED, RECORD)
+            if not acquired:
+                return False
 
             schema = self.read(SCHEMA_ENCODING_COLUMN, indirection_RID)
             # schema may be stored as fixed-size bytes, decode and ensure it's at least num_columns long
@@ -752,7 +763,9 @@ class Table:
     def get_values_by_rid(self, rid, col_indices, relative_version, transaction_id=None):
         lock_manager = self.lock_manager
         # get a shared lock on the rid
-        lock_manager.acquire(transaction_id, self.name, rid, SHARED, RECORD)
+        acquired = lock_manager.acquire(transaction_id, self.name, rid, SHARED, RECORD)
+        if not acquired:
+            return False
 
         result =[]  # list of values in same order as col_indices
         read = self.read
@@ -794,7 +807,9 @@ class Table:
                 #find the latest tail
                 while current != None and current != 0 and current != rid:
                     # get a shared lock on the rid
-                    lock_manager.acquire(transaction_id, self.name, current, SHARED, RECORD)
+                    acquired = lock_manager.acquire(transaction_id, self.name, current, SHARED, RECORD)
+                    if not acquired:
+                        return False
                     tail_schema = read(SCHEMA_ENCODING_COLUMN, current)
                     if tail_schema == None:
                         break
@@ -815,8 +830,11 @@ class Table:
                     
         else:
             # using rabbit_hunt with the base_rid
-            for col_idx in col_indices:                    
-                result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid, transaction_id=transaction_id))   # primary_key is unused when base_rid is given, 0 is placeholder
+            for col_idx in col_indices:     
+                temp_result = self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid, transaction_id=transaction_id) 
+                if temp_result == False:
+                    return False # got blocked by a lock              
+                result.append(temp_result)   # primary_key is unused when base_rid is given, 0 is placeholder
         return result
 
     """
