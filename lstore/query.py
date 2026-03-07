@@ -23,6 +23,7 @@ class Query:
             acquired = lock_manager.acquire(transaction_id, table.name, col, lock_type, INDEX)
             if not acquired:
                 return False
+        return True
 
     """
     # internal Method
@@ -34,8 +35,10 @@ class Query:
         lock_manager = self.lock_manager
         table = self.table
 
-        # lock indexes
-        self.lock_indexes(transaction_id, EXCLUSIVE)
+        # lock indexes and check it first too
+        if not self.lock_indexes(transaction_id, EXCLUSIVE):
+            return False
+
         RIDs = self.table.index.locate(self.table.key, primary_key) 
         if len(RIDs) == 0:
             return False
@@ -61,8 +64,9 @@ class Query:
         lock_manager = self.lock_manager
         rid = table.getNewRID()
 
-        # lock indexes
-        self.lock_indexes(transaction_id, EXCLUSIVE)
+        # lock indexes and check it first too
+        if not self.lock_indexes(transaction_id, EXCLUSIVE):
+            return False
         RIDs = index.locate(key_column, columns[key_column]) 
         if len(RIDs) >= 1:
             return False
@@ -184,8 +188,9 @@ class Query:
         table = self.table
         index = table.index
 
-        # lock indexes
-        self.lock_indexes(transaction_id, EXCLUSIVE)
+        # lock indexes and check it first too
+        if not self.lock_indexes(transaction_id, EXCLUSIVE):
+            return False
         RIDs = index.locate(table.key, primary_key) 
         if len(RIDs) == 0:
             return False
