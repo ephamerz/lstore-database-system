@@ -20,25 +20,45 @@ class LockManager:
     :param lock_type: int
     """
     def acquire(self, transaction_id, table_name, rid, lock_type):
+        key = (table_name, rid) # RIDs are only unique within a table
+
         with self.lock:
-            key = (table_name, rid) # RIDs are only unique within a table
-            if key not in self.lock_dict: # no lock held
+            entry = self.lock_dict.get(key)
+
+            # if no lock exists, give them a lock
+            if not entry: 
                 self.lock_dict[key] = {
-                    'lock_type': lock_type,
-                    'holders': {transaction_id}
+                    "lock_type": lock_type,         # either shared, or exclusive
+                    "holders": {transaction_id}     # set of transaction IDs
                 }
-            else: # lock currently held
-                # incomplete: compatibility check
+                return True
+            
+            current_type = entry["lock_type"]
+            holders = entry["holders"]
 
-                # cases to consider:
-                # any type, held by same transaction : grant, return True (no self blocking)
-                # S requested, S held by others : add to holders, return True
-                # S requested, X held : return False
-                # X requested, S held : return False
-                # X requested, X held : return False
-                pass
-
-            return True
+            # if the transaction requesting the lock already has a lock on the record
+            if transaction_id in holders:
+                if current_type == EXCLUSIVE:                           # already good since everything exclusive
+                    return True
+                
+                if current_type == SHARED and lock_type == SHARED:      # currently shared and resquesting shared
+                    return True
+                
+                if current_type == SHARED and lock_type == EXCLUSIVE:   # S -> X only if it is the holder
+                    if holders == {transaction_id}:
+                        entry["lock_type"] = EXCLUSIVE
+                        return True
+                    else:
+                        # simply cant upgrade since others hold S
+                        return False
+            
+            # transaction is not in holders
+            if lock_type == SHARED:
+                if current_type == SHARED:
+                    holders.add(transaction_id)
+                    return True
+                return False        # if the current is exclusive elsewhere
+            return False
 
     """
     Call from Transaction. Release all locks for the given transaction.
@@ -53,7 +73,11 @@ class LockManager:
                 if transaction_id in entry['holders']
             ]
             for key in keys_to_clean:
-                self.lock_dict[key]['holders'].discard(transaction_id)
-                # clean up empty entries
-                if not self.lock_dict[key]['holders']:
+                entry = self.lock_dict.get(key)
+                #if entry is None: # case shouldn't be possible as LockManger is locked in use
+                #    continue
+
+                entry["holders"].discard(transaction_id)
+
+                if not entry["holders"]:
                     del self.lock_dict[key]
