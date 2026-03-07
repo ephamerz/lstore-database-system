@@ -13,9 +13,9 @@ class LockManager:
         self.record_lock = threading.Lock() # lock for using the record dictionary
         self.index_lock = threading.Lock() # lock for using the index dictionary
 
-        # we should always obtain locks from order of first to last (record then index)
-        # we should always release locks from order of last to first (index then record)
-        self.dict_list = [RECORD, INDEX] # the types of dictionaries we have. never modified, only used for easy iteration
+        # we should always obtain locks from order of first to last (index then record)
+        # we should always release locks from order of last to first (record then index)
+        self.dict_list = [INDEX, RECORD] # the types of dictionaries we have. never modified, only used for easy iteration
 
 
     """
@@ -28,6 +28,9 @@ class LockManager:
     :param object_to_lock: string that tells us if we're locking an index or a record
     """
     def acquire(self, transaction_id, table_name, id, lock_type, object_to_lock):
+        if transaction_id == None: # only happens when query is called independently of a transaction worker thread
+            return True 
+
         key = (table_name, id) # RIDs/index cols are only unique within a table
         # set the lock dictionary for the appropriate object to lock
         lock_dict = self.record_lock_dict

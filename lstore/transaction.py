@@ -1,19 +1,10 @@
 from lstore.table import Table, Record
 from lstore.index import Index
+from lstore.config import DELETE, INSERT, SELECT, SELECT_VERSION, UPDATE, SUM, SUM_VERSION, INCREMENT
 import threading
 
 _transaction_counter = 0
 _counter_lock = threading.Lock()
-
-# query function names for checks later
-DELETE = "delete"
-INSERT = "insert"
-SELECT = "select"
-SELECT_VERSION = "select_version"
-UPDATE = "update"
-SUM = "sum"
-SUM_VERSION = "sum_version"
-INCREMENT = "increment"
 
 class Transaction:
 
@@ -60,9 +51,10 @@ class Transaction:
             #need the original record and use the helper in 
             if query.__name__ in {UPDATE, DELETE, INCREMENT}:
                 primary = args[0]
-                original_record = table._abort(primary)
+                original_record = table._abort(primary, self.transaction_id)
 
-            result = query(*args)
+            kwargs = {"transaction_id": self.transaction_id}
+            result = query(*args, **kwargs)
             # If the query has failed the transaction should abort
             if result == False:
                 return self.abort()
