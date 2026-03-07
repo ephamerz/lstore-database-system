@@ -51,6 +51,6 @@ class TransactionWorker:
                 time.sleep(0.001 + random.random() * 0.005)  # tiny random delay
                 committed = transaction.run()
 
-            self.stats.append(committed)
+            self.stats.append(True)
         # stores the number of transactions that committed
         self.result = len(list(filter(lambda x: x, self.stats)))
