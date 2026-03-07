@@ -15,13 +15,12 @@ class Transaction:
         self.queries = []
         #this list will contain all the changes/writes that occured(no select or sum) so abort can retrieve original record
         self.changes = []
-
+        self.lock_manager = None
         # lock_manager needs a unique transaction ID to track locks per transaction
         global _transaction_counter
         with _counter_lock:
             self.transaction_id = _transaction_counter
             _transaction_counter += 1
-
         pass
 
 
@@ -37,6 +36,10 @@ class Transaction:
         #add table as well so it can be used in abort
         self.queries.append((query, table, args))
         # use grades_table for aborting
+        
+        #store lock manager for commit/abort from table
+        if self.lock_manager == None:
+            self.lock_manager = table.lock_manager            
 
         
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
@@ -85,7 +88,8 @@ class Transaction:
             if query.__name__ == DELETE:              
                 #make sure theres no error or failed to delete so no duplicates
                 if original_record != None:
-                    table.insert_new_record(original_record)
+                    rid = table.getNewRID() #is it okay to get a new rid or does it have to be the old one?
+                    table.insert_new_record(original_record, rid)
                     continue
            
             #if update params (primary key and columns)
@@ -122,7 +126,8 @@ class Transaction:
                 continue
 
         #undo lock since this finishes transaction
-        #self.threading.Lock()
+        if self.lock_manager != None:
+            self.lock_manager.release_all(self.transaction_id)
 
         return False
     
@@ -134,6 +139,8 @@ class Transaction:
         self.changes = []
 
         #undo lock since this finishes transaction
+        if self.lock_manager != None:
+            self.lock_manager.release_all(self.transaction_id)
 
         return True
 
