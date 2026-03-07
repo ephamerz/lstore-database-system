@@ -1,5 +1,5 @@
 import threading
-from lstore.config import SHARED, EXCLUSIVE
+from lstore.config import SHARED, EXCLUSIVE, RECORD, INDEX
 
 """
 Lock manager to manage locks for RECORDS in the database.
@@ -8,26 +8,36 @@ N/A to Bufferpool, Index, Page Directory
 class LockManager:
 
     def __init__(self):
-        self.lock_dict = {}
-        self.lock = threading.Lock()
+        self.record_lock_dict = {} # locks for records
+        self.index_lock_dict = {} # locks for indexes
+        self.record_lock = threading.Lock() # lock for using the record dictionary
+        self.index_lock = threading.Lock() # lock for using the index dictionary
+
 
     """
-    Call from Query. Acquire lock for the given transaction on the given table and RID.
+    Call from Query. Acquire lock for the given transaction on the given table and RID or index.
 
     :param transaction_id: int
     :param table_name: string
-    :param rid: int
+    :param id: int that lets us identify the index or RID we want to lock. it will either be the RID, or the index's column.
     :param lock_type: int
+    :param object_to_lock: string that tells us if we're locking an index or a record
     """
-    def acquire(self, transaction_id, table_name, rid, lock_type):
-        key = (table_name, rid) # RIDs are only unique within a table
-
-        with self.lock:
-            entry = self.lock_dict.get(key)
+    def acquire(self, transaction_id, table_name, id, lock_type, object_to_lock):
+        key = (table_name, id) # RIDs/index cols are only unique within a table
+        # set the lock dictionary for the appropriate object to lock
+        lock_dict = self.record_lock_dict
+        lock = self.record_lock
+        if object_to_lock == INDEX:
+            lock_dict = self.index_lock_dict
+            lock = self.index_lock
+        with lock:
+            
+            entry = lock_dict.get(key)
 
             # if no lock exists, give them a lock
             if not entry: 
-                self.lock_dict[key] = {
+                lock_dict[key] = {
                     "lock_type": lock_type,         # either shared, or exclusive
                     "holders": {transaction_id}     # set of transaction IDs
                 }
@@ -64,20 +74,26 @@ class LockManager:
     Call from Transaction. Release all locks for the given transaction.
 
     :param transaction_id: int
+    :param object_to_release: string telling us whether it was an index or record that we're releasing locks for.
     """
-    def release_all(self, transaction_id):
-        with self.lock:
-            # find every record this transaction holds a lock on
+    def release_all(self, transaction_id, object_to_release):
+        lock_dict = self.record_lock_dict
+        lock = self.record_lock
+        if object_to_release == INDEX:
+            lock_dict = self.index_lock_dict
+            lock = self.index_lock
+        with lock:
+            # find every record/index this transaction holds a lock on
             keys_to_clean = [
-                key for key, entry in self.lock_dict.items()
+                key for key, entry in lock_dict.items()
                 if transaction_id in entry['holders']
             ]
             for key in keys_to_clean:
-                entry = self.lock_dict.get(key)
+                entry = lock_dict.get(key)
                 #if entry is None: # case shouldn't be possible as LockManger is locked in use
                 #    continue
 
                 entry["holders"].discard(transaction_id)
 
                 if not entry["holders"]:
-                    del self.lock_dict[key]
+                    del lock_dict[key]
