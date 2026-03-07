@@ -1,7 +1,8 @@
 from lstore.table import Table, Record
 from lstore.index import Index
-from lstore.config import DELETE, INSERT, SELECT, SELECT_VERSION, UPDATE, SUM, SUM_VERSION, INCREMENT
+from lstore.config import DELETE, INSERT, SELECT, SELECT_VERSION, UPDATE, SUM, SUM_VERSION, INCREMENT, EXCLUSIVE, SHARED, INDEX, RECORD
 import threading
+import time, random
 
 _transaction_counter = 0
 _counter_lock = threading.Lock()
@@ -54,7 +55,10 @@ class Transaction:
             #need the original record and use the helper in 
             if query.__name__ in {UPDATE, DELETE, INCREMENT}:
                 primary = args[0]
-                original_record = table._abort(primary, self.transaction_id)
+                original_record = self._abort(table, primary, self.transaction_id)
+                while original_record == False:
+                    time.sleep(0.001 + random.random() * 0.005)  # tiny random delay
+                    original_record = self._abort(table, primary, self.transaction_id)
 
             kwargs = {"transaction_id": self.transaction_id}
             result = query(*args, **kwargs)
@@ -76,6 +80,22 @@ class Transaction:
         while self.changes:
             #poping will give the popped item and remove from changes
             query, table, args, original_record = self.changes.pop()
+            lock_manager = self.lock_manager
+            indexed_cols = table.index.indexed_columns
+            # upgrade the index and record locks to exclusive
+            for col in indexed_cols:
+                acquired = lock_manager.acquire(self.transaction_id, table.name, col, EXCLUSIVE, INDEX)
+                while not acquired:
+                    time.sleep(0.001 + random.random() * 0.005)  # tiny random delay
+                    acquired = lock_manager.acquire(self.transaction_id, table.name, col, EXCLUSIVE, INDEX)
+
+            RIDs = table.index.locate(table.key, primary)
+            rid = RIDs[0]
+
+            acquired = lock_manager.acquire(self.transaction_id, table.name, rid, EXCLUSIVE, RECORD)
+            while not acquired:
+                time.sleep(0.001 + random.random() * 0.005)  # tiny random delay
+                acquired = lock_manager.acquire(self.transaction_id, table.name, rid, EXCLUSIVE, RECORD)
 
             #if insert (param columns)
             if query.__name__ == INSERT:
@@ -88,7 +108,7 @@ class Transaction:
             if query.__name__ == DELETE:              
                 #make sure theres no error or failed to delete so no duplicates
                 if original_record != None:
-                    rid = table.getNewRID() #is it okay to get a new rid or does it have to be the old one?
+                    #rid = table.getNewRID() #is it okay to get a new rid or does it have to be the old one?
                     table.insert_new_record(original_record, rid)
                     continue
            
@@ -131,6 +151,31 @@ class Transaction:
 
         return False
     
+    # moved it from table to here because i felt like it made more sense (left it commented in table just in case)
+    #helper func for transaction to get original records for update and delete by storing it with primary key:
+    def _abort(self, table, primary, transaction_id):
+        #aborted = False # need to try to abort until it works since records we want to reset can be
+
+        #get the rid for the latest record
+        lock_manager = self.lock_manager
+        acquired = lock_manager.acquire(transaction_id, table.name, table.key, SHARED, INDEX)
+        if not acquired:
+            return False
+        RIDs = table.index.locate(table.key, primary)
+
+        #safety check // record does not exist
+        if len(RIDs) == 0:
+            return None 
+        
+        baseRID = RIDs[0]
+
+        #get latest column so i can use get_values_by_rid to get the latest record
+        latest_column = list(range(table.num_columns))
+        latest_record = table.get_values_by_rid(baseRID, latest_column, 0, transaction_id=transaction_id)
+
+        #return what is stored inside the record
+        return latest_record
+
 
     def commit(self):
         #commit to database

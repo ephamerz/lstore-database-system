@@ -1,6 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 import threading
+import time, random
 
 
 class TransactionWorker:
@@ -46,8 +47,9 @@ class TransactionWorker:
             
             #For an aborted transaction, the thread should keep trying to execute it until it gets committed.
             committed = transaction.run()           
-            #while committed == False: #aborted
-            #    committed = transaction.run()
+            while committed == False: #aborted
+                time.sleep(0.001 + random.random() * 0.005)  # tiny random delay
+                committed = transaction.run()
 
             self.stats.append(committed)
         # stores the number of transactions that committed

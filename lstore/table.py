@@ -66,28 +66,29 @@ class Table:
 
 
 
-    #helper func for transaction to get original records for update and delete by storing it with primary key:
-    def _abort(self, primary, transaction_id=None):
+    # #helper func for transaction to get original records for update and delete by storing it with primary key:
+    # def _abort(self, primary, transaction_id=None):
+    #     aborted = False # need to try to abort until it works since records we want to reset can be
 
-        #get the rid for the latest record
-        lock_manager = self.lock_manager
-        acquired = lock_manager.acquire(transaction_id, self.name, self.key, SHARED, INDEX)
-        if not acquired:
-            return False
-        RIDs = self.index.locate(self.key, primary)
+    #     #get the rid for the latest record
+    #     lock_manager = self.lock_manager
+    #     acquired = lock_manager.acquire(transaction_id, self.name, self.key, SHARED, INDEX)
+    #     if not acquired:
+    #         return False
+    #     RIDs = self.index.locate(self.key, primary)
 
-        #safety check // record does not exist
-        if len(RIDs) == 0:
-            return None 
+    #     #safety check // record does not exist
+    #     if len(RIDs) == 0:
+    #         return None 
         
-        baseRID = RIDs[0]
+    #     baseRID = RIDs[0]
 
-        #get latest column so i can use get_values_by_rid to get the latest record
-        latest_column = list(range(self.num_columns))
-        latest_record = self.get_values_by_rid(baseRID, latest_column, 0, transaction_id=transaction_id)
+    #     #get latest column so i can use get_values_by_rid to get the latest record
+    #     latest_column = list(range(self.num_columns))
+    #     latest_record = self.get_values_by_rid(baseRID, latest_column, 0, transaction_id=transaction_id)
 
-        #return what is stored inside the record
-        return latest_record
+    #     #return what is stored inside the record
+    #     return latest_record
 
     #helper funcs for integrating buffer and disk into table:
 
