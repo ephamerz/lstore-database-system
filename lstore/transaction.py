@@ -5,6 +5,16 @@ import threading
 _transaction_counter = 0
 _counter_lock = threading.Lock()
 
+# query function names for checks later
+DELETE = "delete"
+INSERT = "insert"
+SELECT = "select"
+SELECT_VERSION = "select_version"
+UPDATE = "update"
+SUM = "sum"
+SUM_VERSION = "sum_version"
+INCREMENT = "increment"
+
 class Transaction:
 
     """
@@ -48,7 +58,7 @@ class Transaction:
             original_record = None
 
             #need the original record and use the helper in 
-            if query.__name__ in {"update", "delete", "increment"}:
+            if query.__name__ in {UPDATE, DELETE, INCREMENT}:
                 primary = args[0]
                 original_record = table._abort(primary)
 
@@ -58,7 +68,7 @@ class Transaction:
                 return self.abort()
             
             #update the changes list to contain the previous record in case of abort ONLY for write changes so None = insert query
-            if query.__name__ in {"update", "delete", "increment", "insert"}:
+            if query.__name__ in {UPDATE, DELETE, INCREMENT, INSERT}:
                 self.changes.append((query, table, args, original_record))
 
         return self.commit()
@@ -73,14 +83,14 @@ class Transaction:
             query, table, args, original_record = self.changes.pop()
 
             #if insert (param columns)
-            if query.__name__ == "insert":
+            if query.__name__ == INSERT:
                 primary = args[table.key]
                 #delete the inserted record by deleting primary key
                 table.delete_record(primary)
                 continue
 
             #if delete params(primary key)
-            if query.__name__ == "delete":              
+            if query.__name__ == DELETE:              
                 #make sure theres no error or failed to delete so no duplicates
                 if original_record != None:
                     table.insert_new_record(original_record)
@@ -88,7 +98,7 @@ class Transaction:
            
             #if update params (primary key and columns)
             #convert orignal_record to update format by getting the parameters
-            if query.__name__ == "update":
+            if query.__name__ == UPDATE:
                 #safety check to make sure no errors that crash the code
                 if original_record == None:
                     continue
@@ -105,7 +115,7 @@ class Transaction:
                 continue
 
             #if increment param (primary key and column)
-            if query.__name__ == "increment":
+            if query.__name__ == INCREMENT:
                 if original_record == None:
                     continue
                 #param primary key and column
@@ -123,8 +133,8 @@ class Transaction:
         #self.threading.Lock()
 
         return False
-
     
+
     def commit(self):
         #commit to database
 

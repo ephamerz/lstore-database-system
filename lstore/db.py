@@ -1,6 +1,7 @@
 from lstore.table import Table
 from lstore.bufferpool import Bufferpool
 from lstore.disk_manager import DiskManager
+from lstore.lock_manager import LockManager
 import os
 import struct
 import pickle
@@ -15,6 +16,8 @@ class Database():
 
         self.bufferpool = None
         self.disk_manager = None
+
+        self.lock_manager = LockManager()
 
     def ensure_file_initialized(self):
         if self.bufferpool is not None and self.disk_manager is not None:
@@ -65,7 +68,7 @@ class Database():
                     key = struct.unpack('<q', f.read(8))[0]
 
                 #(not using just dummy Table since the Table needs real values and None caused it to error)
-                table = Table(name, num_columns, key, self.bufferpool, self.disk_manager) # include buffer and disk
+                table = Table(name, num_columns, key, self.bufferpool, self.disk_manager, self.lock_manager) # include buffer and disk
                 table.load(table_path)
                 self.tables[table_name] = table
 
@@ -107,7 +110,7 @@ class Database():
             print(f"dupe table name: '{name}' already exists")
             return None
 
-        table = Table(name, num_columns, key_index, self.bufferpool, self.disk_manager) #include buffer and disk
+        table = Table(name, num_columns, key_index, self.bufferpool, self.disk_manager, self.lock_manager) #include buffer and disk
         self.tables[name] = table
 
         return table # assuming it wants the table returned instead of boolean

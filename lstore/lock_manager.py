@@ -13,6 +13,10 @@ class LockManager:
         self.record_lock = threading.Lock() # lock for using the record dictionary
         self.index_lock = threading.Lock() # lock for using the index dictionary
 
+        # we should always obtain locks from order of first to last (record then index)
+        # we should always release locks from order of last to first (index then record)
+        self.dict_list = [RECORD, INDEX] # the types of dictionaries we have. never modified, only used for easy iteration
+
 
     """
     Call from Query. Acquire lock for the given transaction on the given table and RID or index.
@@ -70,13 +74,25 @@ class LockManager:
                 return False        # if the current is exclusive elsewhere
             return False
 
+
     """
     Call from Transaction. Release all locks for the given transaction.
+
+    release all the locks for all types of objects (indexes, records, etc.) for a transaction, using the release_all_helper
+    :param transaction_id: int
+    """
+    def release_all(self, transaction_id):
+        # LOCKS ARE ACQUIRED IN ORDER OF THE LIST, SO THEY MUST BE RELEASED IN REVERSE ORDER
+        for object in reversed(self.dict_list):
+            self.release_all_helper(transaction_id, object)
+
+    """
+    helper for releasing locks for specific objects, called internally
 
     :param transaction_id: int
     :param object_to_release: string telling us whether it was an index or record that we're releasing locks for.
     """
-    def release_all(self, transaction_id, object_to_release):
+    def release_all_helper(self, transaction_id, object_to_release):
         lock_dict = self.record_lock_dict
         lock = self.record_lock
         if object_to_release == INDEX:

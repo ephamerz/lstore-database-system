@@ -34,7 +34,7 @@ class Table:
     :param bufferpool:          #lets table use bufferpool
     :param disk_manager:        #lets table use disk_manager
     """
-    def __init__(self, name, num_columns, key, bufferpool, disk_manager):
+    def __init__(self, name, num_columns, key, bufferpool, disk_manager, lock_manager):
         self.name = name
         self.key = key
         self.num_columns = num_columns 
@@ -45,6 +45,8 @@ class Table:
         self.index = Index(self, [key])
         self.bufferpool = bufferpool
         self.disk_manager = disk_manager
+        self.lock_manager = lock_manager # the lock manager the db uses. literally only here so that queries can access it lol
+
         self.merge_threshold_pages = 10  # The threshold to trigger a merge
         self.merge_set = [] # holds tail records until 50 records, then add queue
         self.merge_queue = Queue() # used by merge thread
@@ -55,6 +57,7 @@ class Table:
 
         self.page_directory_lock = threading.Lock()
         self.merge_set_lock = threading.Lock()
+        self.RID_counter_lock = threading.Lock()
 
         # Create background thread for merge
         thread = threading.Thread(target=self.merge)
@@ -523,8 +526,10 @@ class Table:
         return int.from_bytes(read_value, byteorder='little', signed = True)
 
     def getNewRID(self):
+        self.RID_counter_lock.acquire()
         RID = self.RID_counter
         self.RID_counter += 1
+        self.RID_counter_lock.release()
         return RID
 
 
