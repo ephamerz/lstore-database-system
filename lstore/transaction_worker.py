@@ -46,8 +46,8 @@ class TransactionWorker:
             
             #For an aborted transaction, the thread should keep trying to execute it until it gets committed.
             committed = transaction.run()           
-            while committed == False: #aborted
-                committed = transaction.run()
+            #while committed == False: #aborted
+            #    committed = transaction.run()
 
             self.stats.append(committed)
         # stores the number of transactions that committed
