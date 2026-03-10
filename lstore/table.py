@@ -4,7 +4,7 @@ import struct
 import threading
 from queue import Queue 
 from lstore.page import Page, PageRange
-from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, BASE_RID_COLUMN, MAX_BASE_PAGES, METADATA_COLUMNS, ENTRY_SIZE
+from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, BASE_RID_COLUMN, MAX_BASE_PAGES, METADATA_COLUMNS, ENTRY_SIZE, SHARED, EXCLUSIVE, RECORD, INDEX
 import pickle
 import os
 
@@ -34,7 +34,7 @@ class Table:
     :param bufferpool:          #lets table use bufferpool
     :param disk_manager:        #lets table use disk_manager
     """
-    def __init__(self, name, num_columns, key, bufferpool, disk_manager):
+    def __init__(self, name, num_columns, key, bufferpool, disk_manager, lock_manager):
         self.name = name
         self.key = key
         self.num_columns = num_columns 
@@ -45,6 +45,8 @@ class Table:
         self.index = Index(self, [key])
         self.bufferpool = bufferpool
         self.disk_manager = disk_manager
+        self.lock_manager = lock_manager # the lock manager the db uses. literally only here so that queries can access it lol
+
         self.merge_threshold_pages = 10  # The threshold to trigger a merge
         self.merge_set = [] # holds tail records until 50 records, then add queue
         self.merge_queue = Queue() # used by merge thread
@@ -55,6 +57,7 @@ class Table:
 
         self.page_directory_lock = threading.Lock()
         self.merge_set_lock = threading.Lock()
+        self.RID_counter_lock = threading.Lock()
 
         # Create background thread for merge
         thread = threading.Thread(target=self.merge)
@@ -63,25 +66,29 @@ class Table:
 
 
 
-    #helper func for transaction to get original records for update and delete by storing it with primary key:
-    def _abort(self, primary):
-        #get the rid for the latest record
-        RIDs = self.index.locate(self.key, primary)
+    # #helper func for transaction to get original records for update and delete by storing it with primary key:
+    # def _abort(self, primary, transaction_id=None):
+    #     aborted = False # need to try to abort until it works since records we want to reset can be
 
-        #safety check // record does not exist
-        if len(RIDs) == 0:
-            return None 
+    #     #get the rid for the latest record
+    #     lock_manager = self.lock_manager
+    #     acquired = lock_manager.acquire(transaction_id, self.name, self.key, SHARED, INDEX)
+    #     if not acquired:
+    #         return False
+    #     RIDs = self.index.locate(self.key, primary)
+
+    #     #safety check // record does not exist
+    #     if len(RIDs) == 0:
+    #         return None 
         
-        baseRID = RIDs[0]
+    #     baseRID = RIDs[0]
 
-        #get latest column so i can use get_values_by_rid to get the latest record
-        latest_column = list(range(self.num_columns))
-        latest_record = self.get_values_by_rid(baseRID, latest_column, 0)
+    #     #get latest column so i can use get_values_by_rid to get the latest record
+    #     latest_column = list(range(self.num_columns))
+    #     latest_record = self.get_values_by_rid(baseRID, latest_column, 0, transaction_id=transaction_id)
 
-        #return what is stored inside the record
-        return latest_record
-
-
+    #     #return what is stored inside the record
+    #     return latest_record
 
     #helper funcs for integrating buffer and disk into table:
 
@@ -161,8 +168,9 @@ class Table:
     """
     # insert an entirely new record. this goes into a base page
     # columns: an array of the columns with values we want to insert. does not include the 4 metadata columns so we need to calculate those ourselves
+    # rid: the rid to assign to the new record
     """
-    def insert_new_record(self, columns):
+    def insert_new_record(self, columns, rid):
         page_ranges = self.page_ranges
         total_columns = self.total_columns
         empty_schema = self.empty_schema #call to reduce repititions
@@ -174,7 +182,6 @@ class Table:
         # initialize an array with the complete list of data values to insert (metadata values + the record's values)
         values = [0] * METADATA_COLUMNS
         values[INDIRECTION_COLUMN] = 0 # not needed but included for clarity
-        rid = self.getNewRID()
         values[RID_COLUMN] = rid
         values[TIMESTAMP_COLUMN] = time.time()
         values[SCHEMA_ENCODING_COLUMN] = empty_schema
@@ -239,8 +246,6 @@ class Table:
     # columns: an array of the columns with values we want the record to be updated to. does not include the 4 metadata columns so we need to calculate those ourselves
     """
     def update_record(self, primary_key, columns):
-        if columns[self.key] is not None: # if we're trying to update the key value, which is not allowed
-            return False
         RIDs = self.index.locate(self.key, primary_key) 
         if len(RIDs) == 0: # record does not exist
             return False 
@@ -523,8 +528,10 @@ class Table:
         return int.from_bytes(read_value, byteorder='little', signed = True)
 
     def getNewRID(self):
+        self.RID_counter_lock.acquire()
         RID = self.RID_counter
         self.RID_counter += 1
+        self.RID_counter_lock.release()
         return RID
 
 
@@ -684,7 +691,13 @@ class Table:
     # @param int version_num: version number to match, where 0 is latest
 
     # @return col_contents: int value at column that matches primary key
-    def rabbit_hunt(self, col_idx, primary_key, version_num, base_rid = None):
+    def rabbit_hunt(self, col_idx, primary_key, version_num, base_rid = None, transaction_id = None):
+        lock_manager = self.lock_manager
+        # get a shared lock on the rid
+        acquired = lock_manager.acquire(transaction_id, self.name, base_rid, SHARED, RECORD)
+        if not acquired:
+            return False
+
         version_num *= 1
 
         physical_col_idx = col_idx + METADATA_COLUMNS
@@ -697,6 +710,11 @@ class Table:
             baseRID = RIDs[0]   # so then first RID treated as base RID for this record's version
         else:   # if know base RID, skip index lookup
             baseRID = base_rid
+
+        # get a shared lock on the rid
+        acquired = lock_manager.acquire(transaction_id, self.name, baseRID, SHARED, RECORD)
+        if not acquired:
+            return False
 
         # check base record's schema encoding to see if columns were ever updated
         base_schema = self.read(SCHEMA_ENCODING_COLUMN, baseRID)
@@ -711,6 +729,10 @@ class Table:
 
         count = 0
         while baseRID != indirection_RID:
+            # get a shared lock on the rid
+            acquired = lock_manager.acquire(transaction_id, self.name, indirection_RID, SHARED, RECORD)
+            if not acquired:
+                return False
 
             schema = self.read(SCHEMA_ENCODING_COLUMN, indirection_RID)
             # schema may be stored as fixed-size bytes, decode and ensure it's at least num_columns long
@@ -736,7 +758,13 @@ class Table:
     # @:param rid: the base RID of the record
     # @:param col_indices: list of user column indicies
     # @:param relative_version: 0 for latest, (-) for previous versions
-    def get_values_by_rid(self, rid, col_indices, relative_version):
+    # @:param transaction_id: int for the transaction that called this, so that we can lock the rids we are reading
+    def get_values_by_rid(self, rid, col_indices, relative_version, transaction_id=None):
+        lock_manager = self.lock_manager
+        # get a shared lock on the rid
+        acquired = lock_manager.acquire(transaction_id, self.name, rid, SHARED, RECORD)
+        if not acquired:
+            return False
 
         result =[]  # list of values in same order as col_indices
         read = self.read
@@ -777,6 +805,10 @@ class Table:
 
                 #find the latest tail
                 while current != None and current != 0 and current != rid:
+                    # get a shared lock on the rid
+                    acquired = lock_manager.acquire(transaction_id, self.name, current, SHARED, RECORD)
+                    if not acquired:
+                        return False
                     tail_schema = read(SCHEMA_ENCODING_COLUMN, current)
                     if tail_schema == None:
                         break
@@ -797,8 +829,11 @@ class Table:
                     
         else:
             # using rabbit_hunt with the base_rid
-            for col_idx in col_indices:                    
-                result.append(self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid))   # primary_key is unused when base_rid is given, 0 is placeholder
+            for col_idx in col_indices:     
+                temp_result = self.rabbit_hunt(col_idx, 0, relative_version, base_rid = rid, transaction_id=transaction_id) 
+                if temp_result == False:
+                    return False # got blocked by a lock              
+                result.append(temp_result)   # primary_key is unused when base_rid is given, 0 is placeholder
         return result
 
     """
