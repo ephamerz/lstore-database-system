@@ -68,9 +68,9 @@ class Transaction:
             if result == LOGICAL_ERROR:
                 
                 self.last_abort_retryable = False
-                self.abort()
                 # print(f"Transaction {self.transaction_id} tried to do an illegal operation. Deleting entire transaction.")
                 # print(f"Query that killed the transaction: {query.__name__} with args {args}")
+                self.abort()
                 return False
             if result == False:
                 # if any query fails, we abort the transaction and return False
@@ -123,7 +123,10 @@ class Transaction:
                         if i != table.key:
                             columns[i] = original_record[i]
                     #then reupdate it to correct one using table method directly (no lock re-acquisition needed)
-                    table.update_record(primary, columns)
+                    # table.update_record(primary, columns)
+                    table.delete_record(primary) # delete the updated record since update_record checks for existence and we want to make sure it goes through
+                    rid = table.getNewRID()
+                    table.insert_new_record(original_record, rid)
                     continue
 
                 #if increment param (primary key and column)
@@ -138,7 +141,9 @@ class Transaction:
                     if column != table.key:
                         columns[column] = original_record[column]
                         #update will undo the added column and restore the old values that were there
-                        table.update_record(primary, columns)
+                        table.delete_record(primary) # delete the updated record since update_record checks for existence and we want to make sure it goes through
+                        rid = table.getNewRID()
+                        table.insert_new_record(original_record, rid)
                     continue
         finally:
             #undo lock since this finishes transaction 

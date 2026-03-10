@@ -192,10 +192,13 @@ class Query:
     """
     def update(self, primary_key, *columns, transaction_id=None):
         if columns[self.table.key] is not None:
-            # illegal operation: primary key updates are not allowed.
-            if transaction_id is not None:
-                return LOGICAL_ERROR
-            return False
+            # illegal operation: primary key updates are not allowed, only if the primary key doesnt exist
+            if columns[self.table.key] == index.locate(self.table.key, columns[self.table.key]):
+                if transaction_id is not None:
+                    return LOGICAL_ERROR
+                return False
+            else:
+                pass
         
         lock_manager = self.lock_manager
         table = self.table
