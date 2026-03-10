@@ -191,18 +191,19 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns, transaction_id=None):
+        
+        lock_manager = self.lock_manager
+        table = self.table
+        index = table.index
+
         if columns[self.table.key] is not None:
             # illegal operation: primary key updates are not allowed, only if the primary key doesnt exist
-            if columns[self.table.key] == index.locate(self.table.key, columns[self.table.key]):
+            if columns[self.table.key] == self.table.index.locate(self.table.key, columns[self.table.key]):
                 if transaction_id is not None:
                     return LOGICAL_ERROR
                 return False
             else:
                 pass
-        
-        lock_manager = self.lock_manager
-        table = self.table
-        index = table.index
 
         # lock indexes and check it first too
         if not self.lock_indexes(transaction_id, EXCLUSIVE):
