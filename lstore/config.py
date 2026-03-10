@@ -14,6 +14,8 @@ EXCLUSIVE = 1 # lock value for exclusive lock
 INDEX = "index" # tells lock manager we are locking an index
 RECORD = "record" # tells lock manager we are locking a record
 
+LOGICAL_ERROR = 500
+
 # query function names for checks later
 DELETE = "delete"
 INSERT = "insert"

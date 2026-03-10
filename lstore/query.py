@@ -1,6 +1,6 @@
 from lstore.table import Table, Record
 from lstore.index import Index
-from lstore.config import METADATA_COLUMNS, BASE_RID_COLUMN, INDEX, RECORD, SHARED, EXCLUSIVE, DELETE, INSERT, SELECT, SELECT_VERSION, UPDATE, SUM, SUM_VERSION, INCREMENT
+from lstore.config import METADATA_COLUMNS, BASE_RID_COLUMN, INDEX, RECORD, SHARED, EXCLUSIVE, DELETE, INSERT, SELECT, SELECT_VERSION, UPDATE, SUM, SUM_VERSION, INCREMENT, LOGICAL_ERROR
 
 
 class Query:
@@ -41,6 +41,8 @@ class Query:
 
         RIDs = self.table.index.locate(self.table.key, primary_key) 
         if len(RIDs) == 0:
+            if transaction_id is not None:
+                return LOGICAL_ERROR
             return False
         
         # lock record
@@ -69,6 +71,12 @@ class Query:
             return False
         RIDs = index.locate(key_column, columns[key_column]) 
         if len(RIDs) >= 1:
+            # DINGDINGDING
+            # if we find a record with the same primary key, we fail the insert and fail the transaction entirely
+            if transaction_id is not None:
+                # we need to be able to distinguish logic errors (trying to update primary key)
+                # DINGDINGDING
+                return LOGICAL_ERROR
             return False
         # lock the record
         acquired = lock_manager.acquire(transaction_id, table.name, rid, EXCLUSIVE, RECORD)
@@ -111,12 +119,15 @@ class Query:
 
         # check if the column is indexed. if not, we have to scan the table manually instead
         if self.table.index.indices[search_key_index] == None:
-            table.page_directory_lock.acquire()
-            for column, rid in self.table.page_directory:
-                # we only care about the column search_key_index
-                if column != search_key_index:
-                    continue
-                
+            # copy matching RIDs while holding the directory lock briefly, then release it
+            # before record-level reads/locks to avoid lock leaks and lock-order deadlocks
+            with table.page_directory_lock:
+                candidate_rids = [
+                    rid for (column, rid) in self.table.page_directory.keys()
+                    if column == search_key_index
+                ]
+
+            for rid in candidate_rids:
                 # get a shared lock on the rid
                 acquired = lock_manager.acquire(transaction_id, table.name, rid, SHARED, RECORD)
                 if not acquired:
@@ -139,7 +150,6 @@ class Query:
                             full_vals[col] = vals[i]
                         vals = full_vals
                     records.append(Record(rid, key_val, vals))
-            table.page_directory_lock.release()
             return records
 
         # --- if we get here then the column is indexed ---
@@ -182,6 +192,9 @@ class Query:
     """
     def update(self, primary_key, *columns, transaction_id=None):
         if columns[self.table.key] is not None:
+            # illegal operation: primary key updates are not allowed.
+            if transaction_id is not None:
+                return LOGICAL_ERROR
             return False
         
         lock_manager = self.lock_manager
